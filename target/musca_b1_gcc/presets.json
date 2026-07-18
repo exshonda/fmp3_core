@@ -1,0 +1,41 @@
+{
+  "version": 4,
+  "include": [
+    "../../cmake/presets-base.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "musca_b1",
+      "inherits": "_base",
+      "displayName": "ARM Musca-B1 (dual Cortex-M33, QEMU, 1 processor)",
+      "description": "QEMU musca-b1 マシン向け（実機非対応）。既定は単一プロセッサ（TNUM_PRCID=1）",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "FMP3_TARGET": "musca_b1_gcc"
+      }
+    },
+    {
+      "name": "musca_b1-2core",
+      "inherits": "musca_b1",
+      "displayName": "ARM Musca-B1 (dual Cortex-M33, QEMU, 2 processors SMP)",
+      "description": "2コアSMP（TNUM_PRCID=2）。クロスコアIPI（MHU）にQEMU>=11.0.1相当が必要",
+      "cacheVariables": {
+        "FMP3_PRC_NUM": "2"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "musca_b1",       "configurePreset": "musca_b1" },
+    { "name": "musca_b1-2core", "configurePreset": "musca_b1-2core" },
+    {
+      "name": "run-musca_b1",
+      "configurePreset": "musca_b1",
+      "targets": [ "run" ]
+    },
+    {
+      "name": "run-musca_b1-2core",
+      "configurePreset": "musca_b1-2core",
+      "targets": [ "run" ]
+    }
+  ]
+}
