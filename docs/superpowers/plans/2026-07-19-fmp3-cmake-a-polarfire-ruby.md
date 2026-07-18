@@ -4,7 +4,7 @@
 
 **Goal:** pristine の Ruby cfg を使って `polarfire_soc_kit_gcc` の `sample1` を CMake でビルドし、`qemu-system-riscv64` 上で起動させる。
 
-**Architecture:** asp3_core と同型の層構造（`CMakePresets.json` → `target/<t>/presets.json` → `cmake/presets-base.json`、`CMakeLists.txt` → `fmp3_core.cmake` → `target.cmake` → `chip.cmake` → `arch.cmake`）を敷き、cfg の3パス（pass1 → `cfg1_out` リンク → `nm`/`objcopy` → pass2×2 → pass3）を CMake に載せる。cfg 実装は `FMP3_CFG_IMPL` で切替可能にし、本計画では既定を `ruby`（pristine の `cfg/cfg.rb`）とする。これにより CMake パイプラインの正しさを、テンプレート Python 移植のバグと**切り離して**検証できる。
+**Architecture:** asp3_core と同型の層構造（`CMakePresets.json` → `target/<t>/presets.json` → `cmake/presets-base.json`、`CMakeLists.txt` → `fmp3_core.cmake` → `target.cmake` → `chip.cmake` → `arch.cmake`）を敷き、cfg の3パス（pass1 → `cfg1_out` リンク → `nm`/`objcopy` → pass2×2 → pass3）を CMake に載せる。**CMake が呼ぶ cfg は常に `cfg_py/cfg.py` のみ**とする。本計画（計画A）の間、`cfg_py/cfg.py` は pristine の `cfg/cfg.rb` へそのまま委譲する薄いシムであり、これにより CMake パイプラインの正しさを、テンプレート Python 移植のバグと**切り離して**検証できる。
 
 **Tech Stack:** CMake 3.20+ / Ninja / `riscv64-unknown-elf-gcc` 13.2.0 / picolibc 1.8.6-2 / ruby 3.2.3 / `qemu-system-riscv64` 8.2.2
 
@@ -13,7 +13,7 @@
 - 設計書は `docs/superpowers/specs/2026-07-18-fmp3-cmake-design.md`。本計画は §8 前半のマイルストーン 1〜3 のみを対象とする。4 以降は計画B。
 - **pristine を編集したら必ず `DIVERGENCE_MAP.md` に1行足す**（AGENTS.md §2 規則2）。本計画で pristine ディレクトリに追加する `.cmake` ファイルはすべて記録対象。
 - **`upstream` ブランチに派生ファイルを載せない**（AGENTS.md §2 規則1）。本計画の作業はすべて `main` 上で行う。
-- **`FMP3_CFG_IMPL=ruby` は本計画限りの足場**。AGENTS.md §2 規則3「pristine の `cfg/` は使わない。cfg 相当は `configurator/`（Python）で提供し、CMake から呼ぶ」に一時的に抵触する。計画Bで既定を `python` に切り替え、Ruby 経路の CMake コードを削除し、Ruby はオラクル（`tools/cfg_equivalence.sh`）としてのみ残す。**この逸脱は Task 8 で `DIVERGENCE_MAP.md` に期限付きで記録する。**
+- **`cfg_py/cfg.py` は本計画（計画A）限りの Ruby 委譲シムである**。CMake が呼ぶのは常に `cfg_py/cfg.py` のみなので、AGENTS.md §2 規則3「pristine の `cfg/` は使わない。cfg 相当は `cfg_py/`（Python）で提供し、CMake から呼ぶ」の**文言は満たす**。ただし**精神には抵触する**（シムは結局 pristine の `cfg/cfg.rb` を実行する）。計画Bでこのシムを asp3_core 1.7.1 の本物のエンジンへ差し替える。**この逸脱は Task 9 で `DIVERGENCE_MAP.md` に期限付きで記録する。**
 - ライブラリ名 `fmp3`（`libfmp3.a`）、実行ファイル名 `fmp`（拡張子なし。上流 `sample/Makefile` の `OBJNAME = fmp` に合わせる）。
 - プリセット名は `polarfire_soc_kit`（実機）/ `polarfire_soc_kit-qemu`（QEMU）。
 - 変数接頭辞は `FMP3_`。asp3_core の `ASP3_*` と同名・同義で揃える。
@@ -30,8 +30,9 @@
 | `CMakePresets.json` | 各 target の `presets.json` を include するだけ | 1 |
 | `target/polarfire_soc_kit_gcc/presets.json` | `polarfire_soc_kit` / `-qemu` の2プリセット | 1 |
 | `fmp3_core.cmake` | `FMP3_ROOT_DIR` / `FMP3_TARGET` / `FMP3_TARGET_DIR` の解決と `fmp3_add_syssvc()` | 1 |
-| `CMakeLists.txt` | cfg 3パス・`libfmp3.a`・`fmp` 実行ファイル・`run` ターゲット。層の最上位 | 1,3,4,5,6,7 |
-| `target/polarfire_soc_kit_gcc/target.cmake` | ボード選択・SDK ソース・リンカスクリプト・`FMP3_RUN_COMMAND` | 1,2,6,7 |
+| `cfg_py/cfg.py` | cfg 実行シム（計画A限り）。`cfg/cfg.rb` へ引数をそのまま委譲し終了コードを透過する | 3 |
+| `CMakeLists.txt` | cfg 3パス・`libfmp3.a`・`fmp` 実行ファイル・`run` ターゲット。層の最上位 | 1,4,5,6,7,8 |
+| `target/polarfire_soc_kit_gcc/target.cmake` | ボード選択・SDK ソース・リンカスクリプト・`FMP3_RUN_COMMAND` | 1,2,7,8 |
 | `arch/riscv_gcc/polarfire_soc/chip.cmake` | チップ依存（`-march`/`-mabi`・PLIC/mtimer/IPI・MMUART） | 2 |
 | `arch/riscv_gcc/common/arch.cmake` | コア依存（`core_sym.def`・`core_offset.trb`・`start.S`） | 2 |
 
@@ -393,7 +394,7 @@ ABI は lp64d のまま。"
   - `FMP3_INCLUDE_DIRS` / `FMP3_COMPILE_DEFS` / `FMP3_COMPILE_OPTIONS`
   - `FMP3_LINK_OPTIONS` / `FMP3_CFG1_OUT_LINK_OPTIONS` / `FMP3_LINK_LIBS` / `FMP3_LDSCRIPT`
   - `FMP3_ARCH_C_FILES` / `FMP3_TARGET_C_FILES` / `FMP3_SYSSVC_TARGET_C_FILES` / `FMP3_START_FILES`
-  - `FMP3_SDK_C_FILES` / `FMP3_SDK_ASM_FILES` — polarfire の Microchip SDK ソース（Task 6 で使う）
+  - `FMP3_SDK_C_FILES` / `FMP3_SDK_ASM_FILES` — polarfire の Microchip SDK ソース（Task 7 で使う）
 
 - [ ] **Step 1: 変数が空であることを確認する（失敗の確認）**
 
@@ -795,15 +796,128 @@ FMP3_PRC_NUM（-DTNUM_PRCID）と FMP3_CFG1_OUT_LINK_OPTIONS
 
 ---
 
-### Task 3: cfg pass1 と `cfg1_out` のリンク
+### Task 3: `cfg_py/cfg.py` シム（Ruby への委譲）
+
+**Files:**
+- Create: `cfg_py/cfg.py`
+
+**Interfaces:**
+- Consumes: pristine `cfg/cfg.rb`（コマンドライン引数の形式をそのまま踏襲する）
+- Produces: `cfg_py/cfg.py`（実行可能な Python スクリプト。以降 Task 4〜9 の `CFG_COMMAND` はこれだけを呼ぶ）
+
+- [ ] **Step 1: シムがまだ無いことを確認する（失敗の確認）**
+
+Run: `ls cfg_py/cfg.py 2>&1`
+Expected: `ls: cannot access 'cfg_py/cfg.py': No such file or directory`
+（`cfg_py/` には README.md しか無い）
+
+- [ ] **Step 2: Ruby 版の `--version` 出力を確認する（シムの判定基準を先に固定する）**
+
+Run: `ruby cfg/cfg.rb --version`
+Expected: `cfg 1.7.1`
+（このリポジトリの `cfg/cfg.rb` の実測値。以降の positive control はこの文字列と比較する）
+
+- [ ] **Step 3: シム本体を書く**
+
+`cfg_py/cfg.py`:
+```python
+#!/usr/bin/env python3
+#
+#               cfg_py/cfg.py -- 計画A限りの Ruby 委譲シム
+#
+#  ★これは計画A（本計画）の間だけ存在するシムである。計画Bで
+#    asp3_core 1.7.1 の本物の Python cfg エンジンにこのファイルごと
+#    差し替える。
+#
+#  pristine の cfg/cfg.rb をそのまま呼び出す薄いラッパ。cfg.rb と
+#  同じコマンドライン引数を受け取り、解釈せずに ruby へそのまま渡し、
+#  終了コードを透過する。
+#
+#  ★引数を解釈しない。解釈すると Ruby 版との差異が生まれる。
+#
+#  作業ディレクトリと環境変数は呼び出し元から引き継ぐ（cd しない、
+#  env を作り直さない）。cfg は cfg1_out.db / cfg1_out.syms /
+#  cfg1_out.srec / cfg2_out.db を裸の相対名で読み書きするため、
+#  cwd が load-bearing である。
+#
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    ruby = shutil.which("ruby")
+    if ruby is None:
+        print(
+            "cfg_py/cfg.py: 'ruby' not found on PATH. "
+            "cfg_py/cfg.py is a Plan-A shim that delegates to the pristine "
+            "cfg/cfg.rb and requires a ruby interpreter.",
+            file=sys.stderr,
+        )
+        return 127
+
+    cfg_rb = Path(__file__).resolve().parent.parent / "cfg" / "cfg.rb"
+    if not cfg_rb.is_file():
+        print(f"cfg_py/cfg.py: {cfg_rb} not found.", file=sys.stderr)
+        return 1
+
+    #  sys.argv[1:] をそのまま渡す。解釈しない。
+    result = subprocess.run([ruby, str(cfg_rb), *sys.argv[1:]])
+    return result.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+- [ ] **Step 4: positive control — シム経由で本当に Ruby が動いていることを確認する**
+
+Run: `python3 -B cfg_py/cfg.py --version`
+Expected: `cfg 1.7.1`
+（Step 2 で確認した `cfg/cfg.rb` 直接実行時の出力と一致する。一致しなければシムが `cfg.rb` を呼んでいないか、別の `cfg.rb` を拾っている）
+
+- [ ] **Step 5: negative control — `ruby` が無い環境では明確に失敗する**
+
+Run:
+```bash
+tmpbin=$(mktemp -d)
+ln -s "$(command -v python3)" "$tmpbin/python3"
+PATH="$tmpbin" "$tmpbin/python3" -B cfg_py/cfg.py --version
+echo "exit=$?"
+```
+Expected:
+```
+cfg_py/cfg.py: 'ruby' not found on PATH. cfg_py/cfg.py is a Plan-A shim that delegates to the pristine cfg/cfg.rb and requires a ruby interpreter.
+exit=127
+```
+→ **`ruby` が無いと確実に落ちる**ことの実証（黙って何もしない、あるいは別の cfg 実装へ
+フォールバックするといった曖昧な失敗をしないことの確認）。
+
+- [ ] **Step 6: コミット**
+
+```bash
+git add cfg_py/cfg.py
+git commit -m "build: cfg_py/cfg.py に Ruby 委譲シムを追加（計画A限り）
+
+CMake が呼ぶ cfg を常に cfg_py/cfg.py だけにするための土台。
+中身は pristine の cfg/cfg.rb へ引数をそのまま渡す薄いラッパで、
+計画Bで asp3_core 1.7.1 の本物のエンジンに差し替える。
+--version がシム経由でも直接実行と同じ 'cfg 1.7.1' を返すこと、
+ruby が無い環境では明確に失敗することを確認した。"
+```
+
+---
+
+### Task 4: cfg pass1 と `cfg1_out` のリンク
 
 **Files:**
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: Task 2 が積んだ全変数
+- Consumes: Task 2 が積んだ全変数、`cfg_py/cfg.py`（Task 3）
 - Produces:
-  - `CFG_COMMAND`（リスト。cfg の起動コマンド。`FMP3_CFG_IMPL` で ruby / python を切替）
+  - `CFG_COMMAND`（リスト。cfg の起動コマンド。常に `${Python3_EXECUTABLE} -B ${FMP3_ROOT_DIR}/cfg_py/cfg.py` 固定）
   - `CFG_GEN_DIR` = `${CMAKE_BINARY_DIR}/generated`（cfg の作業ディレクトリ。全パス共通）
   - `${CFG_GEN_DIR}/cfg1_out.c` / `cfg1_out.timestamp` / `cfg1_out.db`
   - `${CFG_GEN_DIR}/cfg1_out.syms` / `cfg1_out.srec`
@@ -814,48 +928,31 @@ FMP3_PRC_NUM（-DTNUM_PRCID）と FMP3_CFG1_OUT_LINK_OPTIONS
 Run: `cmake --build build/polarfire_soc_kit-qemu 2>&1 | tail -3; ls build/polarfire_soc_kit-qemu/generated 2>&1`
 Expected: `ls: cannot access 'build/polarfire_soc_kit-qemu/generated': No such file or directory`
 
-- [ ] **Step 2: cfg 実装の切替と引数組み立てを書く**
+- [ ] **Step 2: cfg 起動コマンドと引数組み立てを書く**
 
 `CMakeLists.txt` の `include(${FMP3_TARGET_DIR}/target.cmake)` と `FMP3_PRC_NUM` 適用の**後**に追加:
 ```cmake
 #
-#  コンフィギュレータの実装の選択
+#  コンフィギュレータの起動コマンド
 #
-#  ruby   … pristine の cfg/cfg.rb（★計画Aの足場．AGENTS.md §2 規則3 に
-#           一時的に抵触する．計画Bで削除し，Ruby はオラクル用スクリプト
-#           tools/cfg_equivalence.sh からのみ呼ぶ．DIVERGENCE_MAP.md 参照）
-#  python … configurator/cfg.py（計画Bで既定にする）
+#  CMake が呼ぶのは常に cfg_py/cfg.py だけ（AGENTS.md §2 規則3）。
+#  ★計画Aの間，cfg_py/cfg.py は pristine の cfg/cfg.rb へ委譲する薄い
+#    シムである（Task 3）。CMake から見た呼び先は計画Bでも変わらない
+#    ため，このパイプラインは計画Bでそのまま残る。
+#    計画Bで cfg_py/ の中身を asp3_core 1.7.1 の本物のエンジンに
+#    差し替える。DIVERGENCE_MAP.md の「期限付きの逸脱」参照。
 #
-set(FMP3_CFG_IMPL "ruby" CACHE STRING
-    "cfg implementation: ruby (pristine scaffold) or python (configurator/)")
-set_property(CACHE FMP3_CFG_IMPL PROPERTY STRINGS ruby python)
-
-if(FMP3_CFG_IMPL STREQUAL "ruby")
-    find_program(RUBY_EXECUTABLE ruby REQUIRED)
-    set(CFG_COMMAND ${RUBY_EXECUTABLE} ${FMP3_ROOT_DIR}/cfg/cfg.rb)
-    set(CFG_SCRIPT_DEPS
-        ${FMP3_ROOT_DIR}/cfg/cfg.rb
-        ${FMP3_ROOT_DIR}/cfg/pass1.rb
-        ${FMP3_ROOT_DIR}/cfg/pass2.rb
-        ${FMP3_ROOT_DIR}/cfg/GenFile.rb
-        ${FMP3_ROOT_DIR}/cfg/SRecord.rb
-    )
-    message(STATUS "fmp3_core: cfg = ruby (pristine cfg/cfg.rb) -- SCAFFOLD ONLY")
-elseif(FMP3_CFG_IMPL STREQUAL "python")
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    set(CFG_COMMAND ${Python3_EXECUTABLE} -B ${FMP3_ROOT_DIR}/configurator/cfg.py)
-    set(CFG_SCRIPT_DEPS
-        ${FMP3_ROOT_DIR}/configurator/cfg.py
-        ${FMP3_ROOT_DIR}/configurator/pass1.py
-        ${FMP3_ROOT_DIR}/configurator/pass2.py
-        ${FMP3_ROOT_DIR}/configurator/gen_file.py
-        ${FMP3_ROOT_DIR}/configurator/srecord.py
-    )
-    message(STATUS "fmp3_core: cfg = python (configurator/cfg.py)")
-else()
-    message(FATAL_ERROR
-        "FMP3_CFG_IMPL must be 'ruby' or 'python', got '${FMP3_CFG_IMPL}'")
-endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(CFG_COMMAND ${Python3_EXECUTABLE} -B ${FMP3_ROOT_DIR}/cfg_py/cfg.py)
+set(CFG_SCRIPT_DEPS
+    ${FMP3_ROOT_DIR}/cfg_py/cfg.py
+    ${FMP3_ROOT_DIR}/cfg/cfg.rb
+    ${FMP3_ROOT_DIR}/cfg/pass1.rb
+    ${FMP3_ROOT_DIR}/cfg/pass2.rb
+    ${FMP3_ROOT_DIR}/cfg/GenFile.rb
+    ${FMP3_ROOT_DIR}/cfg/SRecord.rb
+)
+message(STATUS "fmp3_core: cfg = cfg_py/cfg.py (Plan-A shim -> pristine cfg/cfg.rb)")
 
 #
 #  cfg 共通の定義
@@ -953,7 +1050,7 @@ endforeach()
 #
 #  ★DEPFILE で .cfg が #include するヘッダを追跡する．cfg が -M で書く
 #    depfile のターゲットは裸の "cfg1_out.timestamp" だが，CMake 3.20+ の
-#    Ninja ジェネレータが変換するため OUTPUT と一致しなくてよい（Task 4 の
+#    Ninja ジェネレータが変換するため OUTPUT と一致しなくてよい（Task 5 の
 #    positive control で実証する）．
 #
 add_custom_command(
@@ -1096,7 +1193,7 @@ Expected: `0`
 git add CMakeLists.txt cmake/nm_to_file.cmake
 git commit -m "build: cfg pass1 と cfg1_out のリンクを追加
 
-FMP3_CFG_IMPL で ruby/python を切替可能にし、既定は ruby（計画Aの足場）。
+CFG_COMMAND は cfg_py/cfg.py 固定（中身は計画AではRuby委譲シム。Task 3）。
 OUTPUT は cfg1_out.timestamp（GenFile が内容不変時にファイルを書き直さない
 ため .c を OUTPUT にすると毎ビルド再実行される）。
 cfg1_out には --no-gc-sections を明示的に足す（TOPPERS_magic_number が
@@ -1105,13 +1202,13 @@ cfg1_out には --no-gc-sections を明示的に足す（TOPPERS_magic_number �
 
 ---
 
-### Task 4: cfg pass2（`offset.h` と `kernel_cfg.c/h`）
+### Task 5: cfg pass2（`offset.h` と `kernel_cfg.c/h`）
 
 **Files:**
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `CFG_COMMAND` / `CFG_GEN_DIR` / `CFG1_OUT_SYMS_FILE` / `CFG1_OUT_SREC_FILE`（Task 3）
+- Consumes: `CFG_COMMAND` / `CFG_GEN_DIR` / `CFG1_OUT_SYMS_FILE` / `CFG1_OUT_SREC_FILE`（Task 4）
 - Produces:
   - `${CFG_GEN_DIR}/offset.h` / `offset.timestamp`
   - `${CFG_GEN_DIR}/kernel_cfg.c` / `kernel_cfg.h` / `kernel_cfg.timestamp` / `cfg2_out.db`
@@ -1124,7 +1221,7 @@ Expected: `ls: cannot access '...': No such file or directory`
 
 - [ ] **Step 2: pass2 の2回の呼び出しを書く**
 
-`CMakeLists.txt` の Task 3 の末尾に追加:
+`CMakeLists.txt` の Task 4 の末尾に追加:
 ```cmake
 #
 #  cfg パス2（-O）：offset.h の生成
@@ -1168,7 +1265,7 @@ add_custom_command(
 #
 #  ★cfg1_out.c と同じ理由で，kernel_cfg.c を別規則の OUTPUT にしない．
 #    BYPRODUCTS で GENERATED 扱いにし，順序は add_dependencies で付ける
-#    （Task 5 の add_library が ${KERNEL_CFG_C_FILE} をソースに取る）．
+#    （Task 6 の add_library が ${KERNEL_CFG_C_FILE} をソースに取る）．
 #
 add_custom_target(generate_cfg_gen_files
     DEPENDS ${OFFSET_TIMESTAMP} ${KERNEL_CFG_TIMESTAMP}
@@ -1239,13 +1336,13 @@ pass1 が再実行されることを positive control で確認した。"
 
 ---
 
-### Task 5: カーネルライブラリ `libfmp3.a`
+### Task 6: カーネルライブラリ `libfmp3.a`
 
 **Files:**
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `FMP3_ARCH_C_FILES` / `FMP3_TARGET_C_FILES`（Task 2）、`KERNEL_CFG_C_FILE`（Task 4）
+- Consumes: `FMP3_ARCH_C_FILES` / `FMP3_TARGET_C_FILES`（Task 2）、`KERNEL_CFG_C_FILE`（Task 5）
 - Produces: CMake ターゲット `fmp3`（`libfmp3.a`）
 
 - [ ] **Step 1: ライブラリがまだ無いことを確認する（失敗の確認）**
@@ -1255,7 +1352,7 @@ Expected: `ls: cannot access 'build/polarfire_soc_kit-qemu/libfmp3.a': No such f
 
 - [ ] **Step 2: ライブラリを書く**
 
-`CMakeLists.txt` の Task 4 の末尾に追加:
+`CMakeLists.txt` の Task 5 の末尾に追加:
 ```cmake
 #
 #  カーネルライブラリ（libfmp3.a）
@@ -1338,13 +1435,13 @@ kernel/Makefile.kernel の KERNEL_FCSRCS 22個 + arch/chip/target のソース
 
 ---
 
-### Task 6: `fmp` 実行ファイル（SDK 込み）と pass3
+### Task 7: `fmp` 実行ファイル（SDK 込み）と pass3
 
 **Files:**
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `fmp3` ライブラリ（Task 5）、`FMP3_SDK_C_FILES` / `FMP3_SDK_ASM_FILES`（Task 2）、`fmp3_add_syssvc()`（Task 1）
+- Consumes: `fmp3` ライブラリ（Task 6）、`FMP3_SDK_C_FILES` / `FMP3_SDK_ASM_FILES`（Task 2）、`fmp3_add_syssvc()`（Task 1）
 - Produces:
   - CMake ターゲット `fmp`（実行ファイル `fmp`）
   - `fmp3_cfg_check(TARGET)`（関数。pass3 を `TARGET` の POST_BUILD に付ける）
@@ -1356,7 +1453,7 @@ Expected: `ls: cannot access 'build/polarfire_soc_kit-qemu/fmp': No such file or
 
 - [ ] **Step 2: pass3 のヘルパと実行ファイルを書く**
 
-`CMakeLists.txt` の Task 5 の末尾に追加:
+`CMakeLists.txt` の Task 6 の末尾に追加:
 ```cmake
 #
 #  cfg パス3：構成チェック（最終 ELF に対する POST_BUILD）
@@ -1455,14 +1552,14 @@ export する（esp32p4 が使う）。"
 
 ---
 
-### Task 7: `run` ターゲットと QEMU 起動
+### Task 8: `run` ターゲットと QEMU 起動
 
 **Files:**
 - Modify: `target/polarfire_soc_kit_gcc/target.cmake`
 - Modify: `CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `fmp` 実行ファイル（Task 6）
+- Consumes: `fmp` 実行ファイル（Task 7）
 - Produces: CMake ターゲット `run`
 
 - [ ] **Step 1: `run` ターゲットがまだ無いことを確認する（失敗の確認）**
@@ -1564,7 +1661,7 @@ sample1 が4プロセッサで起動することを確認済み。"
 
 ---
 
-### Task 8: ライブラリ専用モードの確認と記録
+### Task 9: ライブラリ専用モードの確認と記録
 
 **Files:**
 - Modify: `DIVERGENCE_MAP.md`
@@ -1610,13 +1707,13 @@ Expected: `ninja: error: unknown target 'run'`
 | target/polarfire_soc_kit_gcc/{target.cmake,presets.json} | add | Makefile.target の CMake 版。Microchip SDK のソース16個を最終リンクに加える | - |
 ```
 
-さらに表の下に、Ruby cfg 足場の期限付き記録を追加する:
+さらに表の下に、cfg_py シム足場の期限付き記録を追加する:
 ```markdown
 ## 期限付きの逸脱
 
 | 対象 | 内容 | 解消条件 |
 |---|---|---|
-| `CMakeLists.txt` の `FMP3_CFG_IMPL=ruby` | AGENTS.md §2 規則3「pristine の `cfg/` は使わない。cfg 相当は `configurator/`（Python）で提供し、CMake から呼ぶ」に一時的に抵触する。CMake パイプラインの正しさを、テンプレート Python 移植のバグと切り離して検証するための足場。 | 計画B（`configurator/` への移植とテンプレート移植）の完了時に、既定を `python` へ切り替え、`ruby` 分岐の CMake コードを削除する。以降 Ruby は `tools/cfg_equivalence.sh`（CMake 外）からのみ呼ぶ。**この行が残っている間は AGENTS.md §6 の完了条件を満たさない。** |
+| `cfg_py/cfg.py`（計画Aの中身。Task 3） | AGENTS.md §2 規則3「pristine の `cfg/` は使わない。cfg 相当は `cfg_py/`（Python）で提供し、CMake から呼ぶ」の**文言は満たす**（CMake が呼ぶのは常に `cfg_py/cfg.py`）が、**精神には抵触する**（`cfg_py/cfg.py` は pristine の `cfg/cfg.rb` へ委譲する薄いシムであり、実行されるのは結局 Ruby 版である）。CMake パイプラインの正しさを、テンプレート Python 移植のバグと切り離して検証するための足場。 | 計画B（`cfg_py/` への asp3_core 1.7.1 エンジン移植とテンプレート移植）の完了時に、シムを本物のエンジンへ差し替える。以降 Ruby は `tools/cfg_equivalence.sh`（CMake 外）からのみ呼ぶオラクルとして残す。**この行が残っている間は AGENTS.md §6 の完了条件を満たさない。** |
 ```
 
 - [ ] **Step 5: `CLAUDE.md` の現況を更新する**
@@ -1624,21 +1721,21 @@ Expected: `ninja: error: unknown target 'run'`
 `CLAUDE.md` の「## 現況（2026-07-18）」節の以下の行:
 ```markdown
 - **`CMakeLists.txt` は雛形のままで、ビルドは通らない**（`add_subdirectory` 無し）。
-  `configurator/` も README のみで実装が無い。したがって「ビルドして確認」はまだ成立しない。
+  `cfg_py/` も README のみで実装が無い。したがって「ビルドして確認」はまだ成立しない。
 ```
 を、次に置き換える:
 ```markdown
 - **polarfire_soc_kit_gcc は CMake でビルドでき、QEMU で動く**（計画A完了）。
   `cmake --preset polarfire_soc_kit-qemu && cmake --build build/polarfire_soc_kit-qemu --target run`
-- ただし **cfg は pristine の Ruby（`FMP3_CFG_IMPL=ruby`）を使っている足場の状態**である。
-  `configurator/` はまだ README のみ。計画Bで Python へ移す（DIVERGENCE_MAP.md の
-  「期限付きの逸脱」参照）。
+- ただし **cfg は `cfg_py/cfg.py`（pristine の Ruby `cfg/cfg.rb` へ委譲するシム）を使っている
+  足場の状態**である。計画Bでシムを asp3_core 1.7.1 の本物のエンジンへ差し替える
+  （DIVERGENCE_MAP.md の「期限付きの逸脱」参照）。
 - 他の5ターゲットは未対応（`target.cmake` が無い）。
 ```
 
 - [ ] **Step 6: 記録が正しいことを確認する**
 
-Run: `grep -c 'arch.cmake\|chip.cmake\|target.cmake\|FMP3_CFG_IMPL' DIVERGENCE_MAP.md`
+Run: `grep -c 'arch.cmake\|chip.cmake\|target.cmake\|cfg_py/cfg.py' DIVERGENCE_MAP.md`
 Expected: `4` 以上
 
 Run: `grep -c 'polarfire_soc_kit-qemu' CLAUDE.md`
@@ -1659,10 +1756,10 @@ Expected: ビルド成功、最後の出力が `4`
 
 ```bash
 git add DIVERGENCE_MAP.md CLAUDE.md
-git commit -m "docs: 計画A完了 — pristine への追加と Ruby cfg 足場を記録
+git commit -m "docs: 計画A完了 — pristine への追加と cfg_py シム足場を記録
 
 DIVERGENCE_MAP.md に arch/chip/target の .cmake 追加を記録し、
-FMP3_CFG_IMPL=ruby を『期限付きの逸脱』として解消条件つきで残した。
+cfg_py/cfg.py の Ruby 委譲シムを『期限付きの逸脱』として解消条件つきで残した。
 CLAUDE.md の現況を polarfire がビルド・実行できる状態に更新。"
 ```
 
@@ -1672,21 +1769,21 @@ CLAUDE.md の現況を polarfire がビルド・実行できる状態に更新�
 
 - [ ] `cmake --preset polarfire_soc_kit-qemu && cmake --build build/polarfire_soc_kit-qemu` が通る
 - [ ] `--target run` で `Processor 1 start.` 〜 `Processor 4 start.` と `Sample program starts` が出る
-- [ ] 無変更の再ビルドで cfg が走らない（Task 4 Step 5）
-- [ ] `.cfg` の include ヘッダを触ると pass1 が再実行される（Task 4 Step 6、対照込み）
-- [ ] `cfg1_out.syms` に `TOPPERS_magic_number` があり、`--gc-sections` を効かせると消えることを実演済み（Task 3 Step 6-7）
-- [ ] `FMP3_LIBRARY_ONLY=ON` で `libfmp3.a` だけが作られる（Task 8 Step 2-3）
+- [ ] 無変更の再ビルドで cfg が走らない（Task 5 Step 5）
+- [ ] `.cfg` の include ヘッダを触ると pass1 が再実行される（Task 5 Step 6、対照込み）
+- [ ] `cfg1_out.syms` に `TOPPERS_magic_number` があり、`--gc-sections` を効かせると消えることを実演済み（Task 4 Step 6-7）
+- [ ] `FMP3_LIBRARY_ONLY=ON` で `libfmp3.a` だけが作られる（Task 9 Step 2-3）
 - [ ] `FMP3_PRC_NUM=2` が `-DTNUM_PRCID=2` になる（Task 2 Step 7）
 - [ ] pristine への追加が `DIVERGENCE_MAP.md` に記録されている
-- [ ] Ruby cfg 足場が解消条件つきで記録されている
+- [ ] cfg_py シム足場が解消条件つきで記録されている
 
 ## 計画Bへの引き継ぎ
 
-計画Aは **CMake パイプラインが正しいこと**だけを保証する。cfg の生成物の正しさは Ruby cfg（＝上流と同じ実装）に依存しているため、この時点では自明に正しい。計画Bで Python へ移すとき、この Ruby 経路が**そのままオラクル**になる（設計書 §7.1）。
+計画Aは **CMake パイプラインが正しいこと**だけを保証する。cfg の生成物の正しさは `cfg_py/cfg.py` が委譲する Ruby cfg（＝上流と同じ実装）に依存しているため、この時点では自明に正しい。計画Bで `cfg_py/` の中身を Python エンジンへ差し替えるとき、この Ruby 経路が**そのままオラクル**になる（設計書 §7.1）。CMake 側が呼ぶのは計画A・計画Bを通じて常に `cfg_py/cfg.py` のままなので、A で検証した CMake パイプラインはそのまま残る。
 
 計画Bの入口:
-1. `configurator/` へ asp3_core 1.7.1 のエンジンを移植（設計書 §8-4）
+1. `cfg_py/` へ asp3_core 1.7.1 のエンジンを移植し、`cfg_py/cfg.py` の Ruby 委譲シムを本物のエンジンへ差し替える（設計書 §8-4）
 2. テンプレート移植 — `kernel/` 15個、`arch/riscv_gcc/` 5個・449行、`target/polarfire_soc_kit_gcc/` 3個（設計書 §8-5）
 3. `tools/cfg_equivalence.sh` で Ruby と Python の生成物を比較（`cfg1_out.c` を比較対象に含めること）
 4. エラー経路の回帰スイート（設計書 §7.2）
-5. `FMP3_CFG_IMPL` の既定を `python` にし、`ruby` 分岐を削除
+5. `cfg_py/cfg.py` からシム時代の Ruby 委譲コード（`shutil.which("ruby")` 呼び出し等）を削除し、`CFG_SCRIPT_DEPS` から `cfg/cfg.rb` 系ファイルへの依存を外す（CMake 側の `CFG_COMMAND` 自体は変更不要）
