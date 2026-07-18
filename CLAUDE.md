@@ -14,9 +14,12 @@
 - `upstream` ブランチ作成済み・`main` へマージ済み。pristine（`kernel/` `arch/` `target/` …）はツリーにある。
 - pin：`UPSTREAM_VERSION` = 3.4.0、`UPSTREAM_PRISTINE.txt` = `f3d29a4`
   （fmp3_archive の `stm32mp257f_dk_arm64_gcc-20260718` = release/3.4 の先端）。
-- **取り込んだ target は 6 個だけ**（`tools/upstream_targets.txt` の allowlist）：
-  `m5stamp_esp32p4_gcc` `musca_b1_gcc` `rp2350_pico2_gcc` `polarfire_soc_kit_gcc`
+- **取り込んだ target は 5 個だけ**（`tools/upstream_targets.txt` の allowlist）：
+  `musca_b1_gcc` `rp2350_pico2_gcc` `polarfire_soc_kit_gcc`
   `kria_arm64_gcc` `kria_r5_gcc`。他は意図的に落としてある（DIVERGENCE_MAP.md 参照）。
+  `m5stamp_esp32p4_gcc`（ESP32-P4 ターゲット依存部）は `fmp3_esp_idf`（別リポジトリ）で
+  管理する方針のため除外（他5個＝このプロジェクトで使わない、とは理由が異なる）。
+  `arch/riscv_gcc/esp32p4`（chip 依存部）は pristine のまま残っている。
 - **`CMakeLists.txt` は雛形のままで、ビルドは通らない**（`add_subdirectory` 無し）。
   `cfg_py/` も README のみで実装が無い。したがって「ビルドして確認」はまだ成立しない。
 

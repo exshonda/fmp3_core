@@ -1,4 +1,4 @@
 # fmp3_archive の固定コミット SHA（import_upstream.sh が案内する値を記録）
 # ref: stm32mp257f_dk_arm64_gcc-20260718（release/3.4 の先端。indep 3.4.0 + 全 target 累積）
-# 取り込んだ target は tools/upstream_targets.txt を参照（6 個のみ）
+# 取り込んだ target は tools/upstream_targets.txt を参照（5 個のみ）
 f3d29a4c220f6cd2735e24137cf50948f578b5af
