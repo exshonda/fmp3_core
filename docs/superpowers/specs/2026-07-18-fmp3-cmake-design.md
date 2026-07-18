@@ -1,27 +1,47 @@
-# fmp3_core CMake 化 設計案 v3（2026-07-18）
+# fmp3_core CMake 化 設計案 v4（2026-07-19）
 
 対象: `/home/honda/TOPPERS/FMP3/fmp3_core`
 
 v1 → v2 は Fable と codex の2者レビューを現物で裏取りして反映（§11）。
 v2 → v3 は **esp32_p4 を第1波に追加**したことによる（§12）。
+v3 → v4 は **esp32p4 が第1波から外れ polarfire 単独になった**こと、
+`FMP3_LIBRARY_ONLY` の根拠訂正、ツールチェーン同定検査の追記による（§13）。
 
-**第1波の対象は 2 ターゲット**:
+**第1波の対象は `polarfire_soc_kit_gcc` 単独**である。
 
-| | `polarfire_soc_kit_gcc` | `m5stamp_esp32p4_gcc` |
-|---|---|---|
-| 割込み制御器 | PLIC | **CLIC** |
-| プロセッサ数 | 4（既定） | **2**（`PRC_NUM=2` 必須） |
-| 成果物 | 独立 ELF | **`libfmp3.a`＋ESP-IDF ローダ殻** |
-| 実行検証 | `qemu-system-riscv64` | **`esp-emu`**（マージ済フラッシュ像） |
+| | `polarfire_soc_kit_gcc` |
+|---|---|
+| 割込み制御器 | PLIC |
+| プロセッサ数 | 4（既定） |
+| 成果物 | 独立 ELF |
+| 実行検証 | `qemu-system-riscv64` |
 
-**この2つは意図的に性質が異なる。** 片方だけでは「たまたま動く設計」に気づけないため、
-層の切り方の妥当性を早期に検出する目的で組み合わせている。
+**経緯（v3 からの変更）**: ESP32-P4 は chip 依存部・ターゲット依存部とも別リポジトリ
+`fmp3_esp_idf` で管理する方針にユーザが決定したため、`target/m5stamp_esp32p4_gcc` は
+`tools/upstream_targets.txt` の allowlist から外れた（`git log` の `9dda350` `0d67e33`、
+`DIVERGENCE_MAP.md` の該当行）。`arch/riscv_gcc/esp32p4`（chip 依存部）は上流追従の差分を
+見る目的で pristine のまま当 repo に残っている（`ls arch/riscv_gcc/` で確認）。target は
+現在 5 個（`kria_arm64_gcc` `kria_r5_gcc` `musca_b1_gcc` `polarfire_soc_kit_gcc`
+`rp2350_pico2_gcc`）。
+
+**失われた検証観点（正直に書く）**: v3 は「性質の異なる2ターゲット（PLIC/4コア/独立ELF の
+polarfire と、CLIC/2コア/`libfmp3.a` の esp32p4）で層の切り方を検証する。片方だけでは
+『たまたま動く設計』に気づけない」ことを第1波の狙いにしていた。esp32p4 が外れたことで、
+**その検証は fmp3_core 内ではできなくなった。** 代替は次の2点:
+
+(a) 外部ターゲット契約（`FMP3_TARGET_DIR` / `FMP3_LIBRARY_ONLY`、§3.1・§9.9）の妥当性は、
+    fmp3_esp_idf と fmp3_pico_sdk が実際にこの契約を使った時点で検証される。
+    asp3 系5リポジトリ（§9.2）が同じ契約で動いている実績がある。
+(b) fmp3_core 内で「polarfire だけで動く設計」になっていないかを見るには、第1波に
+    `musca_b1_gcc`（ARM Cortex-M・QEMU）を足すのが自然（RISC-V/PLIC/4コア ⇔
+    ARM Cortex-M/NVIC で対照になる）。**これは未決事項**（§10 に追記）。まだ決まっていない。
 
 ## 0. 現状
 
 - FMP3 3.4.0 pristine を vendor ブランチ `upstream` 経由で取り込み済み（archive commit `f3d29a4`）。
-- target は 6 個: `m5stamp_esp32p4_gcc` `musca_b1_gcc` `rp2350_pico2_gcc`
-  `polarfire_soc_kit_gcc` `kria_arm64_gcc` `kria_r5_gcc`。
+- target は 5 個: `musca_b1_gcc` `rp2350_pico2_gcc`
+  `polarfire_soc_kit_gcc` `kria_arm64_gcc` `kria_r5_gcc`
+  （`m5stamp_esp32p4_gcc` は fmp3_esp_idf 側で管理する方針となり allowlist から除外済み。冒頭参照）。
 - `CMakeLists.txt` は 6 行の雛形、`cfg_py/` は README のみ。ビルドは通らない。
 
 ## 1. 参考実装（実測）
@@ -84,32 +104,40 @@ fmp3_pico_sdk に流用元は無く（arch は `arm_m_gcc` のみ）、asp3_core
 | `arch/riscv_gcc/common/plic_kernel.trb` | 79 |
 | `arch/riscv_gcc/common/core_offset.trb` | 33 |
 | `arch/riscv_gcc/polarfire_soc/chip_kernel.trb` | 36 |
-| **polarfire 経路 計** | **449** |
+| **第1波（polarfire）合計** | **449** |
+
+**esp32p4 は第1波から外れた**（冒頭参照）。esp32p4 経路のテンプレートは削除せず、
+「fmp3_esp_idf 側で必要になる分」として以下に残す。`arch/riscv_gcc/esp32p4` は当 repo に
+pristine のまま残っているため（`ls arch/riscv_gcc/` で確認）、このテンプレート移植を
+fmp3_core 側でやるか fmp3_esp_idf 側でやるかは**未決**である（§9.4 参照）。
+
+| ファイル | 行数 |
+|---|---|
 | `arch/riscv_gcc/common/clic_kernel.trb`（esp32p4） | 47 |
 | `arch/riscv_gcc/esp32p4/chip_kernel.trb`（esp32p4） | 38 |
-| **第1波 合計** | **534** |
+| **esp32p4 経路 計（fmp3_esp_idf 側で要検討）** | **85** |
 
-**この 534 行はすべて Python 前例ゼロの FMP3 固有生成コード**（プロセッサ別 inh/intcfg/exc テーブル、
+**この 449 行はすべて Python 前例ゼロの FMP3 固有生成コード**（プロセッサ別 inh/intcfg/exc テーブル、
 クラス別セクション関数、`GenerateNativeSpn`）であり、最もリスクが高い。
 
-呼び出し連鎖はターゲットごとに異なる:
+呼び出し連鎖:
 
 - polarfire: `target_kernel.py` → `chip_kernel.py` → `core_kernel.py` + `plic_kernel.py`
-- esp32p4: `target_kernel.py` → `chip_kernel.py` → `core_kernel.py` + **`clic_kernel.py`**
-- 両者共通の末端: `core_kernel.py` → `kernel/kernel.py`
+- 末端: `core_kernel.py` → `kernel/kernel.py`
+- （参考・esp32p4 経路）`target_kernel.py` → `chip_kernel.py` → `core_kernel.py` + `clic_kernel.py`。
+  割込み制御器が PLIC/CLIC で分かれるため、polarfire 経路の移植が正しくても esp32p4 経路の
+  保証にはならない点は、esp32p4 に着手する側（fmp3_core か fmp3_esp_idf か、上記未決）が
+  引き続き踏まえること。
 
 （`IncludeTrb` の実測。`chip_kernel.trb:33,38`(esp32p4) / `:31,36`(polarfire) / `core_kernel.trb:115`）
-
-**割込み制御器が PLIC / CLIC で分かれるため、前半の移植が正しくても後半の保証にはならない**
-（§8-9 で esp32p4 の `.cfg` に対しても差分等価性検査を回す理由）。
 
 ## 2. 決定事項
 
 | 項目 | 決定 | 根拠 |
 |---|---|---|
-| 第1波の対象 | `polarfire_soc_kit_gcc` → `m5stamp_esp32p4_gcc` の順 | 性質の異なる2つで層の切り方を検証する。順序は、外部 SDK 依存の無い polarfire で cfg パイプラインを確立してから、esp32p4 の IDF 統合を載せる（cfg 移植のバグと IDF 統合のバグを同時に出さないため） |
+| 第1波の対象 | `polarfire_soc_kit_gcc` 単独 | esp32p4 は chip 依存部・ターゲット依存部とも別リポジトリ `fmp3_esp_idf` が管理する方針にユーザが決定したため、fmp3_core の第1波から外れた（冒頭参照）。外部 SDK 依存の無い polarfire で cfg パイプラインを確立する |
 | 最初のターゲット | `polarfire_soc_kit_gcc` | QEMU 検証可能。`TNUM_PRCID` 既定 4 で FMP3 固有部分を最初から踏める。TTSP3 実績あり |
-| ライブラリモード | **最初から設計に入れる**（後付けしない） | esp32p4 が `libfmp3.a` を要求するため（§3.1）。後から入れると層の切り方をやり直すことになる |
+| ライブラリモード | **最初から設計に入れる**（後付けしない） | `fmp3_pico_sdk` が要求するため（§3.1。**訂正**：v3 は esp32p4 を根拠にしていたが誤り）。後から入れると層の切り方をやり直すことになる |
 | cfg エンジン | asp3_core 1.7.1 を `cfg_py/` へ | §1.3。オラクルと版が揃う |
 | テンプレート配置 | pristine 並置 | 参考 repo 同型。`IncludeTrb` の探索パスが揃う |
 | 検証 | Ruby cfg との差分等価性検査（§7.1） | golden 不要、positive control 可能 |
@@ -139,12 +167,15 @@ asp3_core と同名（接頭辞のみ `FMP3_`）:
    上流の `sample/Makefile:193-194` の `PRC_NUM` に対応する。
    **これは CMake の分岐材料ではなく、コンパイル定義に落とすだけの入口**である。
 
-   省略不可である根拠は 2 つ:
-   - **esp32p4 では必須**。ESP32-P4 は HP コア 2 基だが `target/m5stamp_esp32p4_gcc/target_kernel.h:18`
-     の `TNUM_PRCID` 既定値は **4** であり、上流の `tools/fmp_loader/build_fmp3_lib.sh` は
-     `PRC_NUM=2` を明示的に渡している（`CFG_ARGS+=(PRC_NUM="${PRC_NUM:-2}")`）。
-     手段が無いとこのターゲットは正しくビルドできない。
-   - polarfire では TTSP3 の `mtskman1`〜`3` / `mmutex1` が `PRC_NUM=2` でないと完了しない。
+   省略不可である根拠:
+   - **polarfire では TTSP3 の `mtskman1`〜`3` / `mmutex1` が `PRC_NUM=2` でないと完了しない。**
+     fmp3_core の第1波（polarfire 単独。冒頭参照）における必須性の根拠はこれ一本である。
+   - （経緯・参考）v3 時点ではもう一つの根拠として esp32p4 を挙げていた：ESP32-P4 は HP コア
+     2 基だが `target_kernel.h` の `TNUM_PRCID` 既定値は 4 であり、上流の
+     `tools/fmp_loader/build_fmp3_lib.sh` が `PRC_NUM=2` を明示的に渡していた
+     （`CFG_ARGS+=(PRC_NUM="${PRC_NUM:-2}")`）。esp32p4 が fmp3_core の第1波から外れた
+     （冒頭参照）ため、この根拠は現在の fmp3_core には直接効かない。`target/m5stamp_esp32p4_gcc`
+     はこの repo には既に存在しない（fmp3_esp_idf 側の関心事になった）。
 3. **`FMP3_CFG1_OUT_LINK_OPTIONS`** — `cfg1_out` 専用のリンクオプション（§5 参照）。
 
 **`TNUM_PRCID` の値そのもので CMake を分岐させてはならない。** これは C マクロで、
@@ -160,30 +191,56 @@ asp3_core と同名（接頭辞のみ `FMP3_`）:
 `target/kria_arm64_gcc/kria.ld:81-82` は `*(.kernel_data_*)` `*(.stack*)` を明示回収しているが、
 polarfire の `.ld` は列挙しておらず orphan section のまま動いている（TTSP3 実績あり）。
 **ターゲット追加時の確認項目**とする（§8 の横展開チェックリスト）。
-esp32p4 では「orphan で放置」が成立せず、能動的なリネームで解決している（§3.1）。
+esp32p4（fmp3_esp_idf 側の関心事、§9 参照）では「orphan で放置」が成立せず、能動的な
+リネームで解決している（§3.1 の「esp32p4 固有のビルド要件」に経緯を残している）。
 
-### 3.1 ライブラリモード（esp32p4 が要求。後付けしない）
+### 3.1 ライブラリモード（`fmp3_pico_sdk` が要求。後付けしない）
+
+**訂正（v3 → v4）**: v3 は本節の根拠を「esp32p4 が `libfmp3.a` を要求するため」としていたが、
+esp32p4 は第1波から外れ、かつライブラリモードを実際に要求するのは esp32p4 ではなく
+**`fmp3_pico_sdk`** であることが確認できた。結論（最初から設計に入れる）は変わらないが、
+根拠が誤っていたので訂正する。
+
+現物確認済みの事実:
+
+- 兄弟プロジェクト `/home/honda/TOPPERS/PICO2/asp3_pico_sdk` は `ASP3_LIBRARY_ONLY=ON` を
+  実際に使っている。`README.md:113` に
+  `set(ASP3_LIBRARY_ONLY ON CACHE BOOL "build asp3 as library only" FORCE)`、
+  `docs/design.md:8` に `add_subdirectory(${ASP3_CORE_DIR} asp3)` ＋ `ASP3_LIBRARY_ONLY=ON` とある。
+- `asp3_pico_sdk/docs/README.md:15` はこの2つ（`ASP3_TARGET_DIR` と `ASP3_LIBRARY_ONLY`）を
+  「asp3_core 側の**受け入れ口**」と呼んでいる。
+- 一方 `asp3_esp_idf` は `ASP3_LIBRARY_ONLY` を**使っていない**（`grep` で確認：`option()` 定義
+  自体とドキュメント記述はあるが、既定 OFF のままどこからも ON に上書きされていない。
+  core（asp3_core）が最上位で駆動される構成のため）。
+
+したがって**消費のされ方が2種類ある**:
+
+| パターン | 起動 | 前例 |
+|---|---|---|
+| core が最上位 | `cmake -S <core> -DFMP3_TARGET_DIR=<外部>` | asp3_esp_idf |
+| SDK が最上位＋ライブラリ専用 | SDK 側が `add_subdirectory(fmp3_core)` ＋ `FMP3_LIBRARY_ONLY=ON` | asp3_pico_sdk |
+
+fmp3 側でこれに対応するのは `fmp3_esp_idf`（core が最上位型）と `fmp3_pico_sdk`
+（SDK が最上位＋ライブラリ専用型）である。**`FMP3_LIBRARY_ONLY` が必須になるのは後者。**
+esp32p4 は §9.1 の方針により fmp3_esp_idf 側で管理されるため、この要件判断には直接関与しない
+（esp32p4 自身のビルド方式については後述「esp32p4 固有のビルド要件」に調査結果として残す）。
 
 `FMP3_LIBRARY_ONLY` オプションを設ける（asp3_core の `ASP3_LIBRARY_ONLY`、
 `CMakeLists.txt:28` / `:358` / `:509` が前例）。ON のとき `libfmp3.a` までを作り、
 **実行ファイル・run ターゲット・pass3 の POST_BUILD を作らない**。
 
-esp32p4 はこのモードで ESP-IDF の CMake プロジェクトから取り込まれる。
-上流では `target/m5stamp_esp32p4_gcc/tools/fmp_loader/main/CMakeLists.txt` が
+#### esp32p4 固有のビルド要件（参考・fmp3_esp_idf 側の関心事）
+
+**この項は v3 時点の調査結果であり、esp32p4 が fmp3_core の第1波から外れた（冒頭参照）ため
+fmp3_core 自身の実装対象ではなくなった。削除せず、fmp3_esp_idf 側で再利用できる調査結果として
+残す。** 上流では `target/m5stamp_esp32p4_gcc/tools/fmp_loader/main/CMakeLists.txt` が
 `add_custom_command` で `build_fmp3_lib.sh` を呼び、それが `configure.rb`/`make` で
-`libfmp3.a` を作っている。**この内側の `configure.rb`/`make` を我々の CMake が置き換える。**
+`libfmp3.a` を作っている（この経路は当 repo からは `target/m5stamp_esp32p4_gcc` が既に
+存在しないため直接確認できないが、v3 時点で現物確認済みだった内容として残す）。
 
-#### なぜライブラリなのか（方式(b) が棄却されている）
-
-`target/m5stamp_esp32p4_gcc/idf_image_integration.md:9`:
-
-> 方式(b)「完全独立 ELF + elf2image」は棄却．主理由: `bootloader_utility.c:842` の
-> `assert(rom_index==2)`（flash セグメントちょうど 2 本前提）を RAM-only イメージが踏む．
-
-したがって「FMP3 単体の ELF を焼く」経路は選べない。**ライブラリモードは
-esp32p4 にとって選択肢ではなく前提**である。
-
-#### esp32p4 固有のビルド要件
+方式(b)「完全独立 ELF + elf2image」が棄却されていた根拠（`idf_image_integration.md:9`、
+`bootloader_utility.c:842` の `assert(rom_index==2)`）や、以下のビルド要件は、seam boot 方式
+（§9.8）を採らない限り fmp3_esp_idf 側でも踏む可能性が高い。
 
 | 要件 | 内容 | 出典 |
 |---|---|---|
@@ -228,6 +285,46 @@ set(FMP3_KERNEL_CFG_DIR ${KERNEL_CFG_DIR} PARENT_SCOPE)
 なお fmp3_pico_sdk では `--gc-sections` により pass3 が必要とするシンボルが消えるため
 実際には無効化されている。esp32p4 で同じ問題が起きるかは未確認。
 
+### 3.2 ツールチェーン同定検査（Task 1 で実装済み）
+
+`cmake/toolchain_check.cmake` として実装済み（`git log` の `5788bc7` `fd95b0d`。設計として
+本節に反映する）。
+
+**動機**: 兄弟プロジェクト `asp3_esp_idf` の実測記録
+（`/home/honda/TOPPERS/ASP3CORE/asp3_esp_idf/asp3/target/esp32c6_espidf/target.cmake:18-33`）:
+
+> asp3_core の toolchain-riscv64.cmake は既定プレフィクス riscv64-unknown-elf- を PATH 経由で
+> 解決するため，`-DRISCV64_TOOLCHAIN_PREFIX` の渡し忘れが «ビルドは通るのに間違った
+> コンパイラ» を生む（実測：build/ 配下 320 構成のうち 164 構成が Ubuntu汎用GCC で
+> ビルドされていた）。
+
+fmp3_core も `cmake/toolchain-riscv64.cmake` で `CMAKE_TRY_COMPILE_TARGET_TYPE` を
+`STATIC_LIBRARY` にしている（ベアメタルは完全なリンクができないため）ため、
+`-DCMAKE_TOOLCHAIN_FILE` を渡し忘れてもホストの gcc で `try_compile` が通ってしまうという
+**同じ穴があった**。
+
+**採った設計**: **ツールチェーンファイルが `FMP3_EXPECTED_TOOLCHAIN_MACHINE` を宣言し、
+検査が `-dumpmachine` の出力と `MATCHES` で照合する**（`toolchain_check.cmake` は
+project() の後、`fmp3_core.cmake` の先頭から include）。
+
+- 期待値が宣言されていれば、`-dumpmachine` の出力と照合し、一致しなければ `FATAL_ERROR`。
+- 期待値が未宣言で、かつ `CMAKE_TOOLCHAIN_FILE` も未指定（ホスト gcc へのフォールバックが
+  疑われる）なら `FATAL_ERROR`。
+- 期待値が未宣言だが `CMAKE_TOOLCHAIN_FILE` は渡されている（将来の ARM 系などがまだ宣言を
+  実装していない）場合は、無関係な `FATAL_ERROR` にはせず、検査を省略した旨を
+  `message(STATUS ...)` で必ず告知してスキップする（黙って素通りしない）。
+- `-DFMP3_EXPECTED_TOOLCHAIN_MACHINE=<pattern>` で上書き可能。ツールチェーンファイル側は
+  `if(NOT DEFINED FMP3_EXPECTED_TOOLCHAIN_MACHINE)` で既定を与える。**素の `set()` だと
+  コマンドラインの `-D` を黙って上書きしてしまい、エラーメッセージの「上書きできる」という
+  案内が嘘になる**ため、この書き方を守る（asp3_esp_idf C5 で実際に踏んだ罠）。
+
+**この repo は RISC-V 専用ではない**ことに注意（検査を arch 決め打ちにしてはならない理由）:
+`musca_b1_gcc`・`rp2350_pico2_gcc` は ARM Cortex-M、`kria_arm64_gcc` は AArch64、
+`kria_r5_gcc` は ARM Cortex-R である。したがって「`-dumpmachine` に `riscv64` を含むか」を
+固定判定にすると、これらのターゲットを CMake 化した時点で全部弾いてしまう
+（実際に旧版の検査（`5788bc7`）はこの固定判定で書かれており、`fd95b0d` で
+「ツールチェーンファイルが自分の期待値を宣言する」方式に改めた）。
+
 ## 4. 配置
 
 ```
@@ -243,14 +340,12 @@ target/polarfire_soc_kit_gcc/
   target.cmake  presets.json
   target_kernel.py  target_class.py  target_check.py
 
-（第1波 後半・esp32p4）
+（参考・esp32p4。fmp3_core の第1波からは外れた。fmp3_esp_idf 側の作業になるか、
+ arch/riscv_gcc/esp32p4 が pristine で残っている当 repo 側でやるかは未決。§9.4）
 arch/riscv_gcc/
-  common/  clic_kernel.py                              ← 派生（47行）
-  esp32p4/  chip.cmake  chip_kernel.py                 ← 派生（38行）
-target/m5stamp_esp32p4_gcc/
-  target.cmake                                         ← 派生（presets.json の要否は未決。§10）
-  target_kernel.py  target_class.py  target_check.py
-  tools/fmp_loader/                                    ← pristine（IDF ローダ殻。CMake から改変しない）
+  common/  clic_kernel.py                              ← （47行）
+  esp32p4/  chip.cmake  chip_kernel.py                 ← （38行）
+（target/m5stamp_esp32p4_gcc は当 repo には存在しない。fmp3_esp_idf 側で管理）
 ```
 
 ライブラリ名 `fmp3`、実行ファイル名 `fmp`。プリセット名 `polarfire_soc_kit` /
@@ -357,8 +452,11 @@ pass2 は各実装が自前形式の中間ファイル（Ruby は PStore、Pytho
 
 ### 7.3 実行検証（従検証）
 
-第1波の 2 ターゲットは**実行経路が全く異なる**。共通化できるのは
-「`FMP3_RUN_COMMAND` を target.cmake が定める」という枠だけである。
+第1波は polarfire 単独になった（冒頭参照）ため、fmp3_core としての実行検証は §7.3.1 のみを
+実施する。§7.3.2（esp32p4 / esp-emu）は fmp3_esp_idf 側の関心事になったが、
+v3 時点の調査結果として削除せず残す。**もともとの狙い**（「`FMP3_RUN_COMMAND` を
+target.cmake が定める」という枠だけで実行経路が全く異なる2ターゲットを共通化できるかの検証）は
+fmp3_core 単独では検証できなくなった点に注意（冒頭「失われた検証観点」参照）。
 
 #### 7.3.1 polarfire / QEMU
 
@@ -378,7 +476,11 @@ E51（hart0）は MPFS HAL により待機し、U54（hart1〜4 = PRC1〜4）で
 上流には `QEMU=1` によるビルド切替もある（`Makefile.target:17` 以降でリンカスクリプト・
 picolibc・`-DTOPPERS_USE_QEMU` を選択）。asp3_core の `POLARFIRE_QEMU` オプション相当を設ける。
 
-#### 7.3.2 esp32p4 / esp-emu
+#### 7.3.2 esp32p4 / esp-emu（参考・fmp3_esp_idf 側の関心事）
+
+**esp32p4 が fmp3_core の第1波から外れた（冒頭参照）ため、本節は fmp3_core としての
+実行検証計画ではなくなった。** v3 時点の調査結果として削除せず残す。fmp3_esp_idf 側で
+実行検証を設計する際の参考にする。
 
 ```
 esp-emu --chip esp32p4 --firmware <merged.bin>
@@ -401,14 +503,16 @@ polarfire の `-kernel fmp` とは全く別経路であり、`FMP3_RUN_COMMAND` 
 - **このマシンで esp32p4 が実際に動作するかは未確認。** 動作確認済みなのは C3 である。
 - esp-emu は QEMU ベースではなく Rust 実装で、P4 のデュアルコア SMP をサポートすると
   公称しているが、**FMP3 の SMP 動作がその上で成立するかは踏んでみるまで分からない**。
-  マイルストーン 12（§8）はここが失敗しうる前提で立てる。
+  fmp3_esp_idf 側でマイルストーンを立てる際は、ここが失敗しうる前提で立てること
+  （fmp3_core の §8 には esp32p4 のマイルストーンはもう無い）。
 
 ## 8. マイルストーン
 
-**前半（polarfire）を縦に通してから、後半（esp32p4）を載せる。**
-cfg 移植のバグと IDF 統合のバグを同時に出さないため（§2）。
+**第1波は polarfire 単独**（冒頭参照）。esp32p4 の統合作業（旧 v3 の「後半」9〜12）は
+fmp3_core のマイルストーンからは外れ、**fmp3_esp_idf 側の作業**になる（§9 参照。
+特に §9.5 の想定構成・§9.9）。以下は polarfire を縦に通す手順のみを記す。
 
-### 前半: polarfire を縦に通す
+### polarfire を縦に通す
 
 1. `cmake/`（presets-base, toolchain-riscv64）+ `fmp3_core.cmake` + `CMakeLists.txt` 骨格
    — **`FMP3_LIBRARY_ONLY` の分岐をこの時点で入れる**（後付けしない。§3.1）
@@ -425,47 +529,37 @@ cfg 移植のバグと IDF 統合のバグを同時に出さないため（§2�
 6. **差分等価性検査**（§7.1、positive control 込み）＋ **エラー経路スイート**（§7.2）
 7. 製品ビルドを Python 経路へ切替。Ruby はオラクル用スクリプトとしてのみ残す
 8. 依存関係の正しさを positive control で実演（§6）
+9. 残り 4 ターゲット（`musca_b1_gcc` `rp2350_pico2_gcc` `kria_arm64_gcc` `kria_r5_gcc`）へ横展開。
+   **`musca_b1_gcc` を第1波に含めるかどうかは未決**（冒頭「失われた検証観点」(b)、§10）。
+   決まればこの番号立ては見直す。
 
-### 後半: esp32p4 を載せる
+### esp32p4（参考・fmp3_esp_idf 側の作業）
 
-9. テンプレート移植（esp32p4 経路・**85 行**）:
-   - `arch/riscv_gcc/common/clic_kernel.py`（47 行）
-   - `arch/riscv_gcc/esp32p4/chip_kernel.py`（38 行）
-   - `target/m5stamp_esp32p4_gcc/` の 3 個
-   → ここで**差分等価性検査を esp32p4 の `.cfg` に対しても回す**（§7.1）。
-     CLIC 経路は polarfire の PLIC 経路と別物なので、前半の一致は根拠にならない。
-10. **`FMP3_LIBRARY_ONLY=ON` で `libfmp3.a` がビルドできる**
-    — ABI（ilp32f）、`TOPPERS_OMIT_*_INIT`、`-fno-function-sections`、
-      セクションリネーム、`cfg1_out*.o` 除外（§3.1）
-    → 判定は `libfmp3.a` の中身を上流 `build_fmp3_lib.sh` の生成物と突き合わせる
-      （obj 一覧・各 obj のセクション名を `objdump -h` で比較）。**ビルドが通っただけで
-      成功としない**（セクションリネームの漏れはリンクするまで表面化しない）。
-11. **IDF ローダ殻との統合** — `tools/fmp_loader` の `main/CMakeLists.txt` が
-    `build_fmp3_lib.sh` を呼んでいる箇所を、我々の CMake を呼ぶ形に差し替える。
-    `idf.py build` が通り、最終 ELF がリンクできること。
-    pass3 の引数 export（§3.1）がここで効く。
-12. **esp-emu での実行** — `idf.py merge-bin` → `esp-emu --chip esp32p4 --firmware …`。
-    §7.3.2 のとおり**この経路は未検証**なので、失敗しうる前提で立てる。
-    失敗した場合は実機（M5Stamp ESP32P4）へフォールバックする。
-
-13. 残り 4 ターゲットへ横展開
+旧 v3 の手順 9〜12（esp32p4 経路のテンプレート移植・`FMP3_LIBRARY_ONLY=ON` での
+`libfmp3.a` ビルド・IDF ローダ殻統合・esp-emu 実行）は、fmp3_esp_idf リポジトリが
+新設され次第そちらのマイルストーンとして立て直す。内容は §3.1「esp32p4 固有のビルド要件」・
+§7.3.2・§9.5 に調査結果として残してある。
 
 ### 横展開チェックリスト（ターゲット追加時）
 
 - [ ] **ライブラリモードが要るか**（外部 SDK にリンクされるターゲットか）。
       要るならセクションリネームの要否と、pass3 を誰が呼ぶかを決める
 - [ ] リンカスクリプトが `.kernel_data_*` / `.stack_*` を回収するか、orphan で問題ないか、
-      それとも esp32p4 のようにリネームで解決するか
+      それとも（esp32p4 が採った方式のように）リネームで解決するか
 - [ ] `cfg1_out` のリンクで `--gc-sections` が効いていないか
 - [ ] `arch/` 側テンプレートの有無（割込み制御器が PLIC か CLIC か等でチップ層が変わる）
 - [ ] 実行手段（QEMU / エミュレータ / 実機）と、それが要求する成果物の種類（ELF / フラッシュ像）
 - [ ] `FMP3_PRC_NUM` の既定値がそのチップの実コア数と合っているか
-      （esp32p4 は `target_kernel.h` 既定 4 に対し実コア 2）
+      （参考例：esp32p4 は `target_kernel.h` 既定 4 に対し実コア 2 だった）
 
 ## 9. 将来の統合リポジトリ構成（fmp3_esp_idf）
 
-**ユーザから示された、確定した将来方針。** 第1波（§2・§8）の実装方針そのものを変更するものではないが、
-Task 2 以降で「chip 固有コードをどこに置くか」を判断する際の規律になるため、ここに記す。
+**ユーザから示された、確定した将来方針。** 本節が最初に書かれた時点（v3、コミット `4e92136`）では
+「第1波（§2・§8）の実装方針そのものを変更するものではない」としていたが、その後この方針は
+実際に実行された：`m5stamp_esp32p4_gcc` が `tools/upstream_targets.txt` の allowlist から
+外され（`9dda350`）、DIVERGENCE_MAP.md 等に反映された（`0d67e33`）。**したがって現在は
+第1波そのもの（冒頭・§2・§8）を変更している。** 本節はそれでも、Task 2 以降で
+「chip 固有コードをどこに置くか」を判断する際の規律として有効なため残す。
 
 ### 9.1 方針（ユーザ決定）
 
@@ -548,7 +642,10 @@ fmp3_core（この repo）の `arch/` は `arm64_gcc arm_gcc arm_m_gcc gcc riscv
 `arch/arm_m_gcc/` は `common musca_b1 rp2040 rp2350`、`arch/riscv_gcc/` は
 `common polarfire_soc esp32p4` である（すべて `ls` で確認）。**`arch/` は
 `tools/upstream_targets.txt` の allowlist 対象外**（同ファイルの対象は `target/` 配下のみ）
-なので、target を6個に絞り込んでも上流 arch は取り込んだ分だけ全部残る。
+なので、`target/` を絞り込んでも上流 arch は取り込んだ分だけ全部残る。**現に
+`m5stamp_esp32p4_gcc` は allowlist から除外され target 数は5個になったが
+（冒頭・`9dda350`・`0d67e33`）、`arch/riscv_gcc/esp32p4` は下記のとおり pristine のまま
+残っている。**
 
 | 統合repo | `arch/` の要否 | 根拠 |
 |---|---|---|
@@ -558,9 +655,10 @@ fmp3_core（この repo）の `arch/` は `arm64_gcc arm_gcc arm_m_gcc gcc riscv
 **P4 について訂正**: 前回「esp32p4 chip が fmp3_core に無い」としたのは誤り。
 **esp32p4 の基礎 chip arch（`chip_kernel.trb`・`chip_serial.c`・`Makefile.chip` 等、
 CLIC 対応を含む）は upstream pristine として `fmp3_core/arch/riscv_gcc/esp32p4/` に
-既に存在する**（`m5stamp_esp32p4_gcc` が `tools/upstream_targets.txt` の allowlist に
-入っているため）。したがって P4 の**pristine chip layer は §9.3 の規律における
-「asp3_esp_idf の C3/C6」型**（submodule 側にある）であり、C5 型ではない。
+既に存在する。** これは `target/` の allowlist（`tools/upstream_targets.txt`）とは無関係
+（同ファイルの対象は `target/` 配下のみ）で、`m5stamp_esp32p4_gcc` が現在この allowlist から
+除外されている（冒頭参照）状態でも変わらない。したがって P4 の**pristine chip layer は §9.3 の
+規律における「asp3_esp_idf の C3/C6」型**（submodule 側にある）であり、C5 型ではない。
 
 ただし、ESP-IDF 統合固有の拡張（coprocessor context 管理・CLIC 経由 IPI など、upstream FMP3
 には無い ESP32 固有拡張）は別枠になる可能性が高い。姉妹プロジェクト `esp32_s3` の
@@ -670,8 +768,13 @@ hello/W1/W2 が実機parity達成済み」としている。
 - polarfire の SDK ソース群（`mss_entry.o` 等）のビルド方法。上流は
   `Makefile.target:52-65` で `SYSSVC_ASMOBJS`/`SYSSVC_COBJS` としてリンクしており、
   asp3_core の polarfire target.cmake にはこの SDK コンパイル群が無いため流用では済まない。
+- **第1波に `musca_b1_gcc`（ARM Cortex-M・QEMU）を足すかどうか。** 冒頭「失われた検証観点」
+  (b) の通り、esp32p4 が外れたことで fmp3_core 内では「polarfire だけで動く設計」に
+  なっていないかの検証ができなくなった。RISC-V/PLIC/4コア（polarfire）と対照的な
+  ARM Cortex-M/NVIC（musca_b1_gcc）を第1波に足すのが対策として自然だが、**未決**。
 
-esp32p4 に伴うもの:
+esp32p4 に伴うもの（**fmp3_core の第1波からは外れたが、fmp3_esp_idf 側でこれから
+判断が要る事項として削除せず残す**）:
 
 - **ESP-IDF のバージョン固定。** 上流ドキュメントは v5.5 系（`idf_image_integration.md`
   冒頭が `ESP-IDF: v5.5 / esptool 4.12.dev2`）。ローカルの `~/.espressif` には v5.5 と v6.1 の
@@ -728,6 +831,28 @@ esp32p4 に伴うもの:
 | 10 | 実行検証が 2 系統になった。**入力成果物の種類が違う**（ELF ⇔ マージ済フラッシュ像） | `esp-emu --help` の `--firmware <FIRMWARE> Path to firmware binary (merged flash image)` | §7.3 を 7.3.1 / 7.3.2 に分割 |
 | 11 | テンプレート移植量が第1波で 449 → **534 行**（`clic_kernel.trb` 47 + `esp32p4/chip_kernel.trb` 38） | 現物の `wc -l` | §1.4・§8-9 |
 
+（**v4 の注記**: v4 で§8を作り直した際（§13）、polarfire 側の手順1〜9の番号立ては変えて
+いない（本表の「§8-1」「§8-3」「§8-5b」はそのまま現行の§8を指す）。ただし esp32p4 経路
+だった旧「§8-9」以降（旧「後半」9〜12）は現行の§8には存在しない。本表自体は当時の記録として
+書き換えない。）
+
 **未確認のまま残したこと**: esp-emu 上で ESP32-P4 が実際に動くか。
 `esp-emu` の存在と `--chip esp32p4` の受理は確認したが、動作確認済みなのは C3 である。
-§8-12 はここが失敗しうる前提で立てている。
+§8-12 はここが失敗しうる前提で立てていた（**v4 の注記**: esp32p4 が第1波から外れたため
+§8 の番号立ては§13で述べる通り作り直しており、「§8-12」は現行の§8には存在しない。
+この記述は v3 時点のものとして歴史的にそのまま残す）。
+
+## 13. v3 からの変更点（esp32p4 の第1波除外・関連訂正）
+
+すべて現物で確認済み。
+
+| # | 内容 | 根拠 | 反映先 |
+|---|---|---|---|
+| 1 | **第1波が polarfire 単独になった。** ESP32-P4 は chip 依存部・ターゲット依存部とも別リポジトリ `fmp3_esp_idf` が管理する方針にユーザが決定したため、`target/m5stamp_esp32p4_gcc` を `tools/upstream_targets.txt` の allowlist から除外した。`arch/riscv_gcc/esp32p4`（chip 依存部）は上流追従の差分を見る目的で pristine のまま残している | `git log` の `9dda350`（allowlist から除外）`0d67e33`（台帳・文書反映）。`DIVERGENCE_MAP.md` の `target/m5stamp_esp32p4_gcc` 行。`ls target/` で現在5個であることを確認。`ls arch/riscv_gcc/` で `esp32p4` が pristine のまま残っていることを確認 | 冒頭表・§0・§1.4・§2・§4・§8・§9.1（既存注記の訂正） |
+| 2 | **この除外により失われる検証観点がある**（正直に記録）：v3 は性質の異なる2ターゲットで層の切り方を検証することを狙いにしていたが、esp32p4 が外れたため fmp3_core 内ではこの検証ができなくなった。代替は (a) 外部契約の妥当性は fmp3_esp_idf / fmp3_pico_sdk の実使用時に検証される（asp3系5リポジトリの実績あり）、(b) `musca_b1_gcc` を第1波に足すのが対策として自然だが未決 | 設計判断（推測を含む）。asp3系5リポジトリの実績は§9.2で現物確認済み | 冒頭・§10（未決事項に追記） |
+| 3 | **`FMP3_LIBRARY_ONLY` が必要な理由を訂正。** v3 は「esp32p4 が `libfmp3.a` を要求するため」としていたが誤り。実際にライブラリ専用モードを要求するのは `fmp3_pico_sdk` 側（前例は `asp3_pico_sdk`）。消費のされ方は「core が最上位」（asp3_esp_idf 型）と「SDK が最上位＋ライブラリ専用」（asp3_pico_sdk 型）の2種類あり、後者で必須になる。結論（最初から設計に入れる）は変わらない | `asp3_pico_sdk/README.md:113` の `set(ASP3_LIBRARY_ONLY ON CACHE BOOL ... FORCE)`。`asp3_pico_sdk/docs/design.md:8` の `add_subdirectory(${ASP3_CORE_DIR} asp3)` ＋ `ASP3_LIBRARY_ONLY=ON`。`asp3_pico_sdk/docs/README.md:15` が両者を「受け入れ口」と呼ぶ記述。`asp3_esp_idf` 側で `ASP3_LIBRARY_ONLY` が定義のみで ON に上書きされていないことを `grep` で確認 | §2・§3.1（訂正・新表） |
+| 4 | **ツールチェーン同定検査を設計に反映。** Task 1 で `cmake/toolchain_check.cmake` が実装済み。ツールチェーンファイルが `FMP3_EXPECTED_TOOLCHAIN_MACHINE` を宣言し、検査が `-dumpmachine` の出力と照合する方式。未宣言なら検査をスキップし STATUS で告知。`-D` での上書きは `if(NOT DEFINED ...)` で既定を与えることで機能させる（素の `set()` はコマンドラインの `-D` を黙って上書きするため使わない）。動機は兄弟プロジェクト asp3_esp_idf の実測（320構成中164構成がホストGCCで誤ビルド）。この repo は RISC-V 専用ではない（musca_b1_gcc/rp2350_pico2_gcc は Cortex-M、kria_arm64_gcc は AArch64、kria_r5_gcc は Cortex-R）ため、検査を arch 決め打ちにできない | `git log` の `5788bc7`（初版・riscv64固定判定）`fd95b0d`（期待値宣言方式へ改訂）。`cmake/toolchain_check.cmake` 現物 | §3.2（新設） |
+
+**この改訂で削除したものは無い。** esp32p4 固有の調査結果（ビルド要件・実行検証・IDF統合の
+未決事項）はすべて「参考・fmp3_esp_idf 側の関心事」として残してあり、§3.1・§7.3.2・§9・
+§10 から参照できる。
