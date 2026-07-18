@@ -501,6 +501,14 @@ set(PASS3_ARGS ${CFG_COMMAND} --pass 3 --kernel fmp -O
     ${CFG_INCLUDE_DIRS} ${CFG_CHECK_TRB_FILES})
 
 function(fmp3_cfg_check TARGET)
+    if(NOT FMP3_ROOT_DIR)
+        message(FATAL_ERROR
+            "fmp3_cfg_check(${TARGET}): FMP3_ROOT_DIR is empty in the caller's scope. "
+            "Same caller-scope contract as fmp3_add_syssvc() -- see fmp3_core.cmake "
+            "header comment. fmp3_cfg_check() itself is currently only called from "
+            "within fmp3_core's own CMakeLists.txt (guarded by NOT FMP3_LIBRARY_ONLY); "
+            "this guard exists in case that changes.")
+    endif()
     add_custom_command(TARGET ${TARGET} POST_BUILD
         WORKING_DIRECTORY ${CFG_GEN_DIR}
         COMMAND ${CMAKE_COMMAND}

@@ -31,7 +31,11 @@ polarfire と、CLIC/2コア/`libfmp3.a` の esp32p4）で層の切り方を検�
 
 (a) 外部ターゲット契約（`FMP3_TARGET_DIR` / `FMP3_LIBRARY_ONLY`、§3.1・§9.9）の妥当性は、
     fmp3_esp_idf と fmp3_pico_sdk が実際にこの契約を使った時点で検証される。
-    asp3 系5リポジトリ（§9.2）が同じ契約で動いている実績がある。
+    asp3 系5リポジトリ（§9.2）が同じ契約で動いている実績がある。**★ただし「実績がある」の
+    中身は §9.10（最終レビュー Important 1 で追記）を見ること：`FMP3_ROOT_DIR` の
+    受け渡しは asp3_pico_sdk で実証済みだが，`FMP3_SYSSVC_TARGET_C_FILES` の
+    受け渡しは asp3_pico_sdk では要件自体が発生しておらず（要求値が偶然どちらのスコープでも
+    空になる），実績があるとは言えない。**
 (b) fmp3_core 内で「polarfire だけで動く設計」になっていないかを見るには、第1波に
     `musca_b1_gcc`（ARM Cortex-M・QEMU）を足すのが自然（RISC-V/PLIC/4コア ⇔
     ARM Cortex-M/NVIC で対照になる）。**これは未決事項**（§10 に追記）。まだ決まっていない。
@@ -760,6 +764,68 @@ hello/W1/W2 が実機parity達成済み」としている。
 そのディレクトリの `target.cmake` を探す）。唯一の追加制約は §9.3 の「chip 依存部は
 `CMAKE_CURRENT_LIST_DIR` 相対、共通部・pristine は `FMP3_ROOT_DIR`（asp3 の `ASP3_ROOT_DIR`
 に相当）相対」という書き分けであり、これは Task 2 の実装時に守る。
+
+### 9.10 `fmp3_<sdk>.cmake` パス解決層は必須（ヘルパ関数のスコープ契約）★訂正
+
+**最終レビュー（Important 1）で判明した事実を反映する訂正。** 旧稿の §9.2「5件に共通する部分」は
+`asp3/{asp3_core（submodule）, asp3_<sdk>.cmake, target/}` は必ずあると書いていたが，
+**この `asp3_<sdk>.cmake` パス解決層が何のために必須なのかを明記していなかった**。
+また §0（冒頭の一覧）と §8-2 が「asp3 系5リポジトリが同じ契約で動いている実績がある」と
+述べる箇所も，**この節が指す「契約」の中身を具体的に書いていなかった**ため，
+`fmp3_add_syssvc()` を `add_subdirectory(fmp3_core)` 経由（SDK-as-top-level，§3.1 の
+「SDK が最上位＋ライブラリ専用」パターン）で呼ぶと `FMP3_ROOT_DIR` が空のまま参照され，
+`target_sources()` が `/syssvc/syslog.c` という意味不明な絶対パスで失敗する不具合が
+実装時（Task 9 以降）まで見つからなかった。
+
+**現物確認済みの契約（`asp3_pico_sdk` / `asp3_core` で確認）**:
+
+1. CMake の `function()` は**定義側スコープではなく呼び出し側スコープ**で変数を解決する。
+   `asp3_add_syssvc()`（`asp3_core/asp3_core.cmake:50-65`）が参照する `ASP3_ROOT_DIR` は
+   `asp3_core` 自身のディレクトリスコープ変数であり，`add_subdirectory(asp3_core)` の
+   **子スコープの外には自動で伝播しない**（`asp3_core` に `PARENT_SCOPE` の使用は無い．
+   `grep -c PARENT_SCOPE` で確認済み＝0件）。
+2. **これを埋めるのは `asp3_<sdk>.cmake` パス解決層の責務である。**
+   `asp3_pico_sdk/asp3/asp3_pico_sdk.cmake:27-30`:
+   ```cmake
+   #  asp3_add_syssvc() 等のヘルパ関数は呼び出し側スコープの ASP3_ROOT_DIR を参照する
+   #  （add_subdirectory(asp3_core) の子スコープで設定される値は親へ伝播しないため，
+   #   親スコープ＝本ファイルを include する sample 側でも明示的に設定しておく）．
+   set(ASP3_ROOT_DIR ${ASP3_CORE_DIR})
+   ```
+   これは `add_subdirectory(asp3_core)` より**前に**，呼び出し側（`sample1/CMakeLists.txt`が
+   `include()` する `asp3_pico_sdk.cmake`）自身のスコープで行われる。**§9.2 の「5件で
+   asp3_<sdk>.cmake は必ずある」の必須性の理由はこれである**：チップ/ターゲット解決の便宜
+   だけでなく，ヘルパ関数のスコープ契約を満たすために必須。
+3. **`ASP3_SYSSVC_TARGET_C_FILES`（ターゲット依存 SIO ドライバ）には同じ手が使えない。**
+   この変数は `set()` で一括供給できる単純な値ではなく，`${ASP3_TARGET_DIR}/target.cmake`
+   および `chip.cmake` が `asp3_core` 自身のディレクトリスコープの中で
+   `list(APPEND ...)` / `list(REMOVE_ITEM ...)` を重ねて組み立てる値である。
+   `add_subdirectory(asp3_core)` 経由（SDK-as-top-level）では，この組み立ては**子スコープの
+   中で完結し**，呼び出し側スコープには伝播しない（`asp3_core` に `PARENT_SCOPE` export が
+   無い以上，1 と同じ理由で伝わらない）。
+
+   **`asp3_pico_sdk` はこの問題を解決していない。単に踏んでいないだけである。**
+   `pico2_riscv_sdk_gcc/target.cmake:109-112` と `pico2_arm_sdk_gcc/target.cmake:99-101` は
+   チップ層（`chip.cmake`）が `ASP3_SYSSVC_TARGET_C_FILES` に積んだ `chip_serial.c` /
+   `rp2350_uart.c` を，同じ子スコープの中で直後に `list(REMOVE_ITEM ...)` して取り除いている
+   （pico-sdk 側の stdio に置き換えるため）。結果，子スコープ内で実質空リストになり，
+   一方 `asp3_pico_sdk.cmake` は `ASP3_SYSSVC_TARGET_C_FILES` を一度も `set()` していないため
+   呼び出し側スコープでは**未定義＝空展開**になる。両者がたまたま「空」で一致しているため
+   問題が表面化しないだけで，target.cmake が非空の `ASP3_SYSSVC_TARGET_C_FILES` を要求する
+   外部ターゲットを SDK-as-top-level パターンで使った場合，この経路は今回と同型の不具合
+   （呼び出し側で欠落した値を参照）を再現するはずである（未検証・現物ターゲットが無いため）。
+
+**fmp3 側の対応（本レビューで実施）**:
+
+- `fmp3_add_syssvc()` / `fmp3_cfg_check()` に `FMP3_ROOT_DIR` 空チェックのガードを追加し，
+  空のときは意味不明なパスエラーではなく，上記契約を説明する `FATAL_ERROR` を出すようにした
+  （`fmp3_core.cmake` / `CMakeLists.txt`）。
+- `FMP3_SYSSVC_TARGET_C_FILES` 側は `PARENT_SCOPE` export を追加しない（asp3 系5リポジトリの
+  作法から外れるため）。将来 `fmp3_pico_sdk` 等が非空の `FMP3_SYSSVC_TARGET_C_FILES` を必要と
+  する外部ターゲットを SDK-as-top-level で使う場合は，本節を前提に改めて設計すること。
+- `fmp3_core.cmake` の冒頭コメントに，`fmp3_<sdk>.cmake` パス解決層が
+  `add_subdirectory(fmp3_core)` より前に `FMP3_ROOT_DIR` を明示的に `set()` すべきという
+  契約を明記した（asp3_pico_sdk.cmake:27-30 を前例として引用）。
 
 ## 10. 未決事項
 

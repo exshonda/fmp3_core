@@ -73,6 +73,11 @@ cmake --preset <target> && cmake --build --preset <target>   # 回帰確認
 
 - 衝突＝上流の変更点と自分の乖離が同じ箇所。DIVERGENCE_MAP.md の該当行を根拠に解決する。
 - `import_upstream.sh` は `main` の作業ツリーを触らず、`upstream` ブランチだけを別 worktree で更新する。
+- **`kernel/Makefile.kernel` の `KERNEL_FCSRCS`（22個）と `CMakeLists.txt`（`kernel/*.c` の
+  `add_library(fmp3 ...)` 列挙。現在地は `CMakeLists.txt:448` 付近のコメント参照）を突き合わせる。**
+  `CMakeLists.txt` はこの22個を手書きで列挙しているため、上流が `KERNEL_FCSRCS` にソースを
+  追加・削除しても CMake 側は追従しない（サイレントに古いまま）。マージ後、両者の差分が
+  無いことを確認してから回帰確認に進むこと。
 
 ---
 
