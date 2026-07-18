@@ -123,14 +123,32 @@ include(${CHIPDIR}/chip.cmake)
 #
 list(APPEND FMP3_LINK_OPTIONS -Wl,--gc-sections)
 
+#
+#  ★-T（リンカスクリプト指定）はここでは積まない．
+#
+#  FMP3_LDSCRIPT の値（cfg1_out / fmp の LINK_DEPENDS 追跡用）を確定
+#  させるだけに留める．-T の適用は CMakeLists.txt の
+#  include(target.cmake) 直後の1箇所（POLARFIRE_QEMU で書式を分ける
+#  実装。理由は同ファイルのコメント参照）に集約する．
+#
+#  ここで積んでしまうと，将来 fmp 実行ファイルを組む Task が asp3_core
+#  と同じパターンで -Wl,-T,${FMP3_LDSCRIPT} を足したときに
+#    riscv64-unknown-elf-gcc ... -T mpfs-lim.ld -Wl,-T,mpfs-lim.ld
+#  のように2回指定され，ld が
+#    "linker script file '...' appears multiple times"
+#  で fatal error になる（実リンカで再現済み）．
+#
+#  上流 Makefile.target:106-107 も同じ理由で，QEMU=1 のとき COPTS に
+#  -T $(LDSCRIPT) を混ぜた直後に `LDSCRIPT =` で変数を空にしている．
+#  上流が LDSCRIPT を空にするのは「-T が要らない」からではなく
+#  「二重に渡さないため」である（-T 自体は要る）．
+#
 if(POLARFIRE_QEMU)
     #  Makefile.target:106
-    #  picolibc.specs が picolibc.ld を追加する（%{!T:-Tpicolibc.ld}）のを
-    #  -T で抑止し，--gc-sections で消えるカーネル構成テーブルを保持する．
-    list(APPEND FMP3_LINK_OPTIONS
-        -T ${FMP3_LDSCRIPT}
-        -Wl,--undefined=_kernel_mpfinib_table
-    )
+    #  --undefined=_kernel_mpfinib_table は --gc-sections で消えるカーネル
+    #  構成テーブルを保持するためのもの．-T 自体（picolibc.specs の
+    #  %{!T:-Tpicolibc.ld} を抑止する側）は CMakeLists.txt 側で積む．
+    list(APPEND FMP3_LINK_OPTIONS -Wl,--undefined=_kernel_mpfinib_table)
 
     #
     #  Makefile.target:108-110
@@ -138,10 +156,4 @@ if(POLARFIRE_QEMU)
     #  TOPPERS_magic_number が除去される．これを抑止する．
     #
     list(APPEND FMP3_CFG1_OUT_LINK_OPTIONS -Wl,--no-gc-sections)
-else()
-    #
-    #  実機ビルドでは -T を COPTS に混ぜる理由（picolibc.ld の抑止）が
-    #  無いので，通常どおりリンカへ渡す．
-    #
-    list(APPEND FMP3_LINK_OPTIONS -Wl,-T,${FMP3_LDSCRIPT})
 endif()

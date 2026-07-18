@@ -623,7 +623,8 @@ ABI は lp64d のまま。"
 - Create: `arch/riscv_gcc/common/arch.cmake`
 - Create: `arch/riscv_gcc/polarfire_soc/chip.cmake`
 - Modify: `target/polarfire_soc_kit_gcc/target.cmake`（Task 1 の骨組みを本体で置き換える）
-- Modify: `CMakeLists.txt`（`FMP3_PRC_NUM` の適用と変数ダンプを追加）
+- Modify: `CMakeLists.txt`（`FMP3_PRC_NUM` の適用と変数ダンプを追加。2026-07-19 追記：
+  `-T` の1箇所集約も Step 4b でここに追加）
 
 **Interfaces:**
 - Consumes: `FMP3_ROOT_DIR` / `FMP3_TARGET_DIR`（Task 1）
@@ -908,14 +909,24 @@ include(${FMP3_ROOT_DIR}/arch/riscv_gcc/polarfire_soc/chip.cmake)
 #
 list(APPEND FMP3_LINK_OPTIONS -Wl,--gc-sections)
 
+#
+#  ★-T（リンカスクリプト指定）はここでは積まない．FMP3_LDSCRIPT の値
+#    （LINK_DEPENDS 追跡用）を確定させるだけに留める．-T の適用は
+#    CMakeLists.txt の include(target.cmake) 直後の1箇所に集約する
+#    （下記 Step 5 参照）。ここで積むと，Task 7 が fmp 実行ファイルを
+#    組むときに asp3_core と同じパターンで -Wl,-T, を足した場合，
+#    -T と -Wl,-T, が両方入って ld が
+#      "linker script file '...' appears multiple times" で fatal error
+#    になる（実リンカで再現確認済み。2026-07-19 の地雷潰しタスクで発覚）。
+#    上流 Makefile.target:106-107 も QEMU=1 のとき COPTS に -T を混ぜた
+#    直後に `LDSCRIPT =` で空にしているのと同じ理由．
+#
 if(POLARFIRE_QEMU)
     #  Makefile.target:106
-    #  picolibc.specs が picolibc.ld を追加する（%{!T:-Tpicolibc.ld}）のを
-    #  -T で抑止し，--gc-sections で消えるカーネル構成テーブルを保持する．
-    list(APPEND FMP3_LINK_OPTIONS
-        -T ${FMP3_LDSCRIPT}
-        -Wl,--undefined=_kernel_mpfinib_table
-    )
+    #  --undefined=_kernel_mpfinib_table は --gc-sections で消えるカーネル
+    #  構成テーブルを保持するためのもの．-T 自体（picolibc.specs の
+    #  %{!T:-Tpicolibc.ld} を抑止する側）は CMakeLists.txt 側で積む．
+    list(APPEND FMP3_LINK_OPTIONS -Wl,--undefined=_kernel_mpfinib_table)
 
     #
     #  Makefile.target:108-110
@@ -923,12 +934,33 @@ if(POLARFIRE_QEMU)
     #  TOPPERS_magic_number が除去される．これを抑止する．
     #
     list(APPEND FMP3_CFG1_OUT_LINK_OPTIONS -Wl,--no-gc-sections)
-else()
-    #
-    #  実機ビルドでは -T を COPTS に混ぜる理由（picolibc.ld の抑止）が
-    #  無いので，通常どおりリンカへ渡す．
-    #
-    list(APPEND FMP3_LINK_OPTIONS -Wl,-T,${FMP3_LDSCRIPT})
+endif()
+```
+
+- [ ] **Step 4b（2026-07-19 追記）: `CMakeLists.txt` 側で `-T` を1箇所に集約する**
+
+`CMakeLists.txt` の `include(${FMP3_TARGET_DIR}/target.cmake)` の**直後**に挿入:
+```cmake
+#
+#  リンカスクリプトの適用（-T）はここ1箇所に集約する．
+#
+#  ★QEMU（picolibc）と実機（newlib-nano）で書式を変える必要がある：
+#    picolibc.specs は `%{!T:-Tpicolibc.ld}` を持ち，gcc ドライバの -T
+#    スイッチが立っているかどうかだけで picolibc 既定のリンカスクリプトを
+#    追加するか判定する．-Wl,-T,<file> は gcc の -T スイッチを立てない
+#    ため，QEMU 側で asp3_core と同じ -Wl,-T, を使うと picolibc.ld が
+#    「も」-T されてしまう．実測：mpfs-lim.ld のみ意図しているのに
+#    -Wl,-T, で統一すると _start が picolibc.ld 既定の 0x80000000 に
+#    化ける（ld はエラーにせず後着の picolibc.ld が勝つ）．ビルドは
+#    通るのに実機で起動しない，という壊れ方をするので asp3_core の
+#    書式をそのまま流用しないこと．
+#
+if(DEFINED FMP3_LDSCRIPT)
+    if(POLARFIRE_QEMU)
+        list(APPEND FMP3_LINK_OPTIONS -T ${FMP3_LDSCRIPT})
+    else()
+        list(APPEND FMP3_LINK_OPTIONS -Wl,-T,${FMP3_LDSCRIPT})
+    endif()
 endif()
 ```
 
@@ -974,7 +1006,10 @@ foreach(f IN LISTS FMP3_ARCH_C_FILES)
 endforeach()
 message(STATUS "fmp3_core: FMP3_LDSCRIPT   = ${FMP3_LDSCRIPT}")
 message(STATUS "fmp3_core: FMP3_CFG1_OUT_LINK_OPTIONS = ${FMP3_CFG1_OUT_LINK_OPTIONS}")
+message(STATUS "fmp3_core: FMP3_LINK_OPTIONS = ${FMP3_LINK_OPTIONS}")
 ```
+（2026-07-19 追記：`FMP3_LINK_OPTIONS` の行は Step 4b の -T 集約が「1回だけ」効いていることを
+目視確認するために追加した。）
 
 - [ ] **Step 6: 積み上がった変数を確認する**
 
@@ -998,7 +1033,10 @@ Expected（順不同ではなくこの順で出る）:
 --     arch: .../arch/riscv_gcc/common/core_support.S
 -- fmp3_core: FMP3_LDSCRIPT   = .../sdk/boards/icicle-kit-es/platform_config/lim-debug/linker/mpfs-lim.ld
 -- fmp3_core: FMP3_CFG1_OUT_LINK_OPTIONS = -Wl,--no-gc-sections
+-- fmp3_core: FMP3_LINK_OPTIONS = ...;-Wl,--gc-sections;-Wl,--undefined=_kernel_mpfinib_table;-T;.../mpfs-lim.ld
 ```
+（`FMP3_LINK_OPTIONS` は `-T` が1回だけ現れることを確認する。`grep -c` で
+`-T`／`-Wl,-T` の出現数を数えて `1` であることを確認するとよい。）
 
 - [ ] **Step 7: `FMP3_PRC_NUM` が効くことを確認する**
 
