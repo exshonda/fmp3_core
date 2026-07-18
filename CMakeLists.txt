@@ -105,3 +105,204 @@ endforeach()
 message(STATUS "fmp3_core: FMP3_LDSCRIPT   = ${FMP3_LDSCRIPT}")
 message(STATUS "fmp3_core: FMP3_CFG1_OUT_LINK_OPTIONS = ${FMP3_CFG1_OUT_LINK_OPTIONS}")
 message(STATUS "fmp3_core: FMP3_LINK_OPTIONS = ${FMP3_LINK_OPTIONS}")
+
+#
+#  コンフィギュレータの起動コマンド
+#
+#  CMake が呼ぶのは常に cfg_py/cfg.py だけ（AGENTS.md §2 規則3）。
+#  ★計画Aの間，cfg_py/cfg.py は pristine の cfg/cfg.rb へ委譲する薄い
+#    シムである（Task 3）。CMake から見た呼び先は計画Bでも変わらない
+#    ため，このパイプラインは計画Bでそのまま残る。
+#    計画Bで cfg_py/ の中身を asp3_core 1.7.1 の本物のエンジンに
+#    差し替える。DIVERGENCE_MAP.md の「期限付きの逸脱」参照。
+#
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(CFG_COMMAND ${Python3_EXECUTABLE} -B ${FMP3_ROOT_DIR}/cfg_py/cfg.py)
+set(CFG_SCRIPT_DEPS
+    ${FMP3_ROOT_DIR}/cfg_py/cfg.py
+    ${FMP3_ROOT_DIR}/cfg/cfg.rb
+    ${FMP3_ROOT_DIR}/cfg/pass1.rb
+    ${FMP3_ROOT_DIR}/cfg/pass2.rb
+    ${FMP3_ROOT_DIR}/cfg/GenFile.rb
+    ${FMP3_ROOT_DIR}/cfg/SRecord.rb
+)
+message(STATUS "fmp3_core: cfg = cfg_py/cfg.py (Plan-A shim -> pristine cfg/cfg.rb)")
+
+#
+#  cfg 共通の定義
+#
+#  sample/Makefile:263-264 の CFG_TABS に相当（core_sym.def は arch.cmake が積む）
+#
+list(APPEND FMP3_API_TABLES    ${FMP3_ROOT_DIR}/kernel/kernel_api.def)
+list(APPEND FMP3_SYMVAL_TABLES ${FMP3_ROOT_DIR}/kernel/kernel_sym.def)
+
+#
+#  アプリケーションの選択
+#
+if(NOT DEFINED FMP3_APPLNAME)
+    set(FMP3_APPLNAME sample1)
+endif()
+if(NOT DEFINED FMP3_APPLDIR)
+    set(FMP3_APPLDIR ${FMP3_ROOT_DIR}/sample)
+endif()
+if(NOT IS_ABSOLUTE ${FMP3_APPLDIR})
+    set(FMP3_APPLDIR ${FMP3_ROOT_DIR}/${FMP3_APPLDIR})
+endif()
+set(FMP3_APP_CFG_FILE ${FMP3_APPLDIR}/${FMP3_APPLNAME}.cfg)
+
+#  アプリの .cfg は最後に置く（sample/Makefile:393 の $< に相当）
+list(APPEND FMP3_CFG_FILES ${FMP3_APP_CFG_FILE})
+
+#  sample/Makefile:197 の INCLUDES := -I. -I$(SRCDIR)/include ... -I$(SRCDIR)
+list(APPEND FMP3_INCLUDE_DIRS
+    ${FMP3_ROOT_DIR}/include
+    ${FMP3_ROOT_DIR}
+    ${FMP3_APPLDIR}
+)
+
+#
+#  生成物の置き場所
+#
+#  cfg は cfg1_out.db / cfg1_out.syms / cfg1_out.srec / cfg2_out.db を
+#  ★裸の相対名で読み書きする★ため，全パスで WORKING_DIRECTORY を
+#  ここに固定することが必須である．
+#
+set(CFG_GEN_DIR ${CMAKE_BINARY_DIR}/generated)
+file(MAKE_DIRECTORY ${CFG_GEN_DIR})
+
+set(CFG1_OUT_FILE       ${CFG_GEN_DIR}/cfg1_out.c)
+set(CFG1_OUT_TIMESTAMP  ${CFG_GEN_DIR}/cfg1_out.timestamp)
+set(CFG1_OUT_DEPFILE    ${CFG_GEN_DIR}/cfg1_out_c.d)
+set(CFG1_OUT_SYMS_FILE  ${CFG_GEN_DIR}/cfg1_out.syms)
+set(CFG1_OUT_SREC_FILE  ${CFG_GEN_DIR}/cfg1_out.srec)
+set(OFFSET_H_FILE       ${CFG_GEN_DIR}/offset.h)
+set(OFFSET_TIMESTAMP    ${CFG_GEN_DIR}/offset.timestamp)
+set(KERNEL_CFG_TIMESTAMP ${CFG_GEN_DIR}/kernel_cfg.timestamp)
+set(KERNEL_CFG_C_FILE   ${CFG_GEN_DIR}/kernel_cfg.c)
+set(KERNEL_CFG_H_FILE   ${CFG_GEN_DIR}/kernel_cfg.h)
+
+#  生成した kernel_cfg.h / offset.h を #include できるようにする
+list(APPEND FMP3_INCLUDE_DIRS ${CFG_GEN_DIR})
+
+#
+#  cfg コマンドライン引数の組み立て
+#
+foreach(path IN LISTS FMP3_SYMVAL_TABLES)
+    list(APPEND CFG_SYMVAL_TABLES "--symval-table" ${path})
+endforeach()
+foreach(path IN LISTS FMP3_API_TABLES)
+    list(APPEND CFG_API_TABLES "--api-table" ${path})
+endforeach()
+foreach(path IN LISTS FMP3_CLASS_TRB_FILES)
+    list(APPEND CFG_CLASS_TRB_FILES "-C" ${path})
+endforeach()
+foreach(path IN LISTS FMP3_OFFSET_TRB_FILES)
+    list(APPEND CFG_OFFSET_TRB_FILES "-T" ${path})
+endforeach()
+foreach(path IN LISTS FMP3_KERNEL_CFG_TRB_FILES)
+    list(APPEND CFG_KERNEL_CFG_TRB_FILES "-T" ${path})
+endforeach()
+foreach(path IN LISTS FMP3_CHECK_TRB_FILES)
+    list(APPEND CFG_CHECK_TRB_FILES "-T" ${path})
+endforeach()
+foreach(path IN LISTS FMP3_INCLUDE_DIRS)
+    list(APPEND CFG_INCLUDE_DIRS "-I${path}")
+endforeach()
+
+#
+#  cfg パス1：.cfg ＋ api-table → cfg1_out.c
+#
+#  ★OUTPUT に宣言するのは cfg1_out.timestamp であって cfg1_out.c ではない．
+#    cfg の GenFile は内容が変わらないときファイルを書き直さない
+#    （タイムスタンプを更新しない）ため，.c を OUTPUT に宣言すると
+#    毎ビルド pass1 が再実行される．上流 Makefile も timestamp 方式である．
+#
+#  ★DEPFILE で .cfg が #include するヘッダを追跡する．cfg が -M で書く
+#    depfile のターゲットは裸の "cfg1_out.timestamp" だが，CMake 3.23+ の
+#    Ninja ジェネレータが変換するため OUTPUT と一致しなくてよい（Task 5 の
+#    positive control で実証する）．
+#
+add_custom_command(
+    OUTPUT ${CFG1_OUT_TIMESTAMP}
+    BYPRODUCTS ${CFG1_OUT_FILE} ${CFG_GEN_DIR}/cfg1_out.db
+    WORKING_DIRECTORY ${CFG_GEN_DIR}
+    COMMAND ${CFG_COMMAND} --pass 1 --kernel fmp
+            ${CFG_INCLUDE_DIRS} ${CFG_API_TABLES} ${CFG_SYMVAL_TABLES}
+            -M ${CFG1_OUT_DEPFILE} ${FMP3_CFG_FILES}
+    DEPENDS ${CFG_SCRIPT_DEPS} ${FMP3_API_TABLES} ${FMP3_SYMVAL_TABLES}
+            ${FMP3_CFG_FILES}
+    DEPFILE ${CFG1_OUT_DEPFILE}
+    COMMENT "Running cfg pass 1 to generate cfg1_out.c"
+)
+
+#
+#  ★cfg1_out.c を「別の add_custom_command の OUTPUT」にしてはならない．
+#    同じファイルを生成する規則が2つできて Ninja が
+#    "multiple rules generate ..." で失敗する．
+#    BYPRODUCTS で GENERATED 扱いにし，順序は add_dependencies で付ける．
+#
+add_custom_target(cfg_pass1 DEPENDS ${CFG1_OUT_TIMESTAMP})
+set_source_files_properties(${CFG1_OUT_FILE} PROPERTIES GENERATED TRUE)
+
+#
+#  cfg1_out のビルド（静的 API パラメータの値の取り出し用）
+#
+#  ★この実行ファイルは絶対に実行しない．nm と objcopy でシンボルの値を
+#    静的に読み出すだけである．これがクロスコンパイルで成立する理由．
+#
+add_executable(cfg1_out ${FMP3_START_FILES} ${CFG1_OUT_FILE})
+add_dependencies(cfg1_out cfg_pass1)
+target_include_directories(cfg1_out
+    PRIVATE ${FMP3_INCLUDE_DIRS}
+    PRIVATE ${FMP3_ROOT_DIR}/kernel
+)
+target_compile_definitions(cfg1_out PRIVATE ${FMP3_COMPILE_DEFS})
+target_compile_options(cfg1_out PRIVATE ${FMP3_COMPILE_OPTIONS})
+#  ★最終 ELF 用の --gc-sections が cfg1_out に効くと TOPPERS_magic_number が
+#    消え，pass2 が cfg1_out.syms から見つけられずに停止する．
+#    上流 Makefile.target:110 と同じく --no-gc-sections を明示的に足す．
+target_link_options(cfg1_out PRIVATE
+    ${FMP3_LINK_OPTIONS} ${FMP3_CFG1_OUT_LINK_OPTIONS})
+target_link_libraries(cfg1_out PRIVATE ${FMP3_LINK_LIBS})
+
+if(DEFINED FMP3_LDSCRIPT)
+    set_property(TARGET cfg1_out APPEND PROPERTY LINK_DEPENDS ${FMP3_LDSCRIPT})
+endif()
+
+#
+#  シンボルテーブルとイメージの取り出し
+#
+#  ★">" のシェルリダイレクトは使わない（ジェネレータ依存になるため）．
+#    cmake -E env の代わりに nm の出力を CMake 経由でファイルへ書く．
+#
+add_custom_command(
+    OUTPUT ${CFG1_OUT_SYMS_FILE}
+    COMMAND ${CMAKE_COMMAND}
+            -DNM=${CMAKE_NM}
+            -DELF=$<TARGET_FILE:cfg1_out>
+            -DOUT=${CFG1_OUT_SYMS_FILE}
+            -P ${FMP3_ROOT_DIR}/cmake/nm_to_file.cmake
+    DEPENDS cfg1_out ${FMP3_ROOT_DIR}/cmake/nm_to_file.cmake
+    COMMENT "Generating cfg1_out.syms"
+)
+
+add_custom_command(
+    OUTPUT ${CFG1_OUT_SREC_FILE}
+    COMMAND ${CMAKE_OBJCOPY} -O srec -S $<TARGET_FILE:cfg1_out> ${CFG1_OUT_SREC_FILE}
+    DEPENDS cfg1_out
+    COMMENT "Generating cfg1_out.srec"
+)
+
+#
+#  ★上の2つの add_custom_command は，それ単体では Ninja ジェネレータの
+#    build.ninja に書き出されない（実測で確認: 何にも依存されない
+#    add_custom_command(OUTPUT ...) は，ジェネレータが到達不能と判断して
+#    ビルドグラフから丸ごと落とす。Makefiles/Ninja 双方の CMake 一般論
+#    ではなく，このジェネレータ・バージョンでの実測結果）。
+#    そのままでは `ninja generated/cfg1_out.syms` が
+#    "unknown target" になる。DEPENDS で拾う target を用意して
+#    到達可能にする（ALL 化はしない．既定ビルドに含めるかは pass2 を
+#    書く Task 5 の判断に委ねる）。
+#
+add_custom_target(cfg1_out_syms DEPENDS ${CFG1_OUT_SYMS_FILE})
+add_custom_target(cfg1_out_srec DEPENDS ${CFG1_OUT_SREC_FILE})
