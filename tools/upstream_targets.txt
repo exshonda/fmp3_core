@@ -1,0 +1,19 @@
+# upstream ブランチへ取り込む target/ 配下の allowlist（1行1ディレクトリ名）。
+# ここに無い target は import_upstream.sh が捨てる。存在しない名前を書くとエラーで止まる。
+# このファイルごと削除すると「target/ 全部入り」になる。
+# 行末コメントは書けない（1行まるごとがディレクトリ名として扱われる）。
+#
+# 追加したくなったら 1 行足して import_upstream.sh を再実行 → git merge upstream。
+
+# ESP32-P4 (RISC-V)
+m5stamp_esp32p4_gcc
+# Arm Cortex-M (QEMU)
+musca_b1_gcc
+# RP2350 / Pico 2 (Arm Cortex-M)
+rp2350_pico2_gcc
+# PolarFire SoC (RISC-V, QEMU)
+polarfire_soc_kit_gcc
+# Kria AArch64 (QEMU)
+kria_arm64_gcc
+# Kria Cortex-R5 (QEMU)
+kria_r5_gcc

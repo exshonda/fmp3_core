@@ -1,0 +1,6 @@
+{
+  "version": 6,
+  "configurePresets": [
+    { "name": "linux", "generator": "Ninja", "binaryDir": "build/linux" }
+  ]
+}

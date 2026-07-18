@@ -1,0 +1,2 @@
+# fmp3_archive の固定コミット SHA（import_upstream.sh が案内する値を記録）
+<archive-commit-sha>

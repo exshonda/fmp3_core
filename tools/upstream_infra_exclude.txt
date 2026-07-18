@@ -1,0 +1,11 @@
+# fmp3_archive 取り込み時に upstream ブランチへ入れない（＝除外する）archive 側の運用ファイル。
+# pristine ソース（kernel/ arch/ target/ include/ syssvc/ library/ cfg/ ...）だけを取り込む。
+tools/
+docs/
+packages/
+RELEASES.csv
+AGENTS.md
+CLAUDE.md
+README.md
+.gitattributes
+.gitignore
