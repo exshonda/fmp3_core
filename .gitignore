@@ -2,3 +2,4 @@
 .upstream_pending_sha
 *.tmp
 /.superpowers/
+__pycache__/
