@@ -9,18 +9,20 @@
 
 ## 現況（2026-07-18）
 
-**このリポジトリはまだ bootstrap 前の scaffold である。** 以下を前提に判断すること。
+**pristine の取り込みは完了。派生（CMake / Python cfg）の実装はこれから。**
 
-- **コミットが 1 つも無い**（`git log` が `does not have any commits yet` を返す）。
-- `upstream` ブランチは**未作成**。pristine（`kernel/` `arch/` `target/` …）は**まだ入っていない**。
-- `UPSTREAM_PRISTINE.txt` は未記入（`<archive-commit-sha>` のまま）。
-- `CMakeLists.txt` は雛形で、**ビルドは通らない**（`add_subdirectory` 無し）。`configurator/` も README のみで実装が無い。
-
-したがって「ビルドして確認」は現時点では成立しない。まず AGENTS.md §3 の初回セットアップを行う。
+- `upstream` ブランチ作成済み・`main` へマージ済み。pristine（`kernel/` `arch/` `target/` …）はツリーにある。
+- pin：`UPSTREAM_VERSION` = 3.4.0、`UPSTREAM_PRISTINE.txt` = `f3d29a4`
+  （fmp3_archive の `stm32mp257f_dk_arm64_gcc-20260718` = release/3.4 の先端）。
+- **取り込んだ target は 6 個だけ**（`tools/upstream_targets.txt` の allowlist）：
+  `m5stamp_esp32p4_gcc` `musca_b1_gcc` `rp2350_pico2_gcc` `polarfire_soc_kit_gcc`
+  `kria_arm64_gcc` `kria_r5_gcc`。他は意図的に落としてある（DIVERGENCE_MAP.md 参照）。
+- **`CMakeLists.txt` は雛形のままで、ビルドは通らない**（`add_subdirectory` 無し）。
+  `configurator/` も README のみで実装が無い。したがって「ビルドして確認」はまだ成立しない。
 
 ```bash
-# 上流 archive の位置（このリポジトリから見て ../FMP3/fmp3_archive）
-tools/import_upstream.sh ../FMP3/fmp3_archive v3.1.0
+# 上流 archive の位置（このリポジトリから見て ../fmp3_archive）
+tools/import_upstream.sh ../fmp3_archive <ref>
 ```
 
 ---

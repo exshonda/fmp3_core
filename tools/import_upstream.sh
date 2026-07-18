@@ -37,7 +37,8 @@ mkdir -p "$stage"
 # --- archive 取得 & ref 解決 ---
 git clone -q --no-checkout "$ARCHIVE" "$adir"
 git -C "$adir" fetch -q --tags origin 2>/dev/null || true
-sha="$(git -C "$adir" rev-parse "$REF")" || die "ref 解決不可: $REF"
+# ^{commit} で peel する（annotated tag をそのまま使うと tag オブジェクトの SHA が pin に残る）
+sha="$(git -C "$adir" rev-parse --verify "${REF}^{commit}")" || die "ref 解決不可: $REF"
 log "archive ref '${REF}' = ${sha}"
 
 # --- ツリー抽出（infra strip） ---
