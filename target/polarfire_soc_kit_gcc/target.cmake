@@ -128,8 +128,9 @@ list(APPEND FMP3_LINK_OPTIONS -Wl,--gc-sections)
 #
 #  FMP3_LDSCRIPT の値（cfg1_out / fmp の LINK_DEPENDS 追跡用）を確定
 #  させるだけに留める．-T の適用は CMakeLists.txt の
-#  include(target.cmake) 直後の1箇所（POLARFIRE_QEMU で書式を分ける
-#  実装。理由は同ファイルのコメント参照）に集約する．
+#  include(target.cmake) 直後の1箇所（FMP3_LDSCRIPT_VIA_DRIVER_T で
+#  書式を分ける実装。このターゲットは下で ON を宣言する。理由は同
+#  ファイルのコメント参照）に集約する．
 #
 #  ここで積んでしまうと，将来 fmp 実行ファイルを組む Task が asp3_core
 #  と同じパターンで -Wl,-T,${FMP3_LDSCRIPT} を足したときに
@@ -156,6 +157,16 @@ if(POLARFIRE_QEMU)
     #  TOPPERS_magic_number が除去される．これを抑止する．
     #
     list(APPEND FMP3_CFG1_OUT_LINK_OPTIONS -Wl,--no-gc-sections)
+
+    #
+    #  リンカスクリプト指定を「素の -T」にする．picolibc.specs の
+    #  %{!T:-Tpicolibc.ld} は gcc ドライバの -T スイッチの有無だけを見て
+    #  picolibc 既定のリンカスクリプトを追加注入するため，-Wl,-T,<file>
+    #  では防げない（実測。CMakeLists.txt の -T 適用箇所のコメント参照）．
+    #  適用そのものは CMakeLists.txt の1箇所に集約されているため，ここでは
+    #  ON を宣言するだけに留める．
+    #
+    set(FMP3_LDSCRIPT_VIA_DRIVER_T ON)
 
     #
     #  QEMU による実行（cmake --build <dir> --target run）

@@ -57,6 +57,27 @@ set(FMP3_PRC_NUM "" CACHE STRING
 #    FMP3_LINK_LIBS / FMP3_LDSCRIPT / FMP3_ARCH_C_FILES / FMP3_TARGET_C_FILES /
 #    FMP3_SYSSVC_TARGET_C_FILES / FMP3_START_FILES
 #
+#  リンカスクリプト指定の書式（-T か -Wl,-T, か）は，ターゲット固有の C
+#  ライブラリ specs が「-Wl,-T,<file> だけでは自前のリンカスクリプトを
+#  検出できず，specs 側の既定リンカスクリプトを追加注入してしまう」場合に
+#  だけ ON にするトグルである．picolibc.specs の %{!T:-Tpicolibc.ld} が
+#  これに該当する（gcc ドライバの -T スイッチが立っているかどうかだけを
+#  見るため，-Wl 経由の -T では検出できない．詳細は下の -T 適用箇所の
+#  コメントと target/polarfire_soc_kit_gcc/target.cmake 参照）．
+#
+#  ほとんどのツールチェーン（arm-none-eabi の newlib 既定 specs を含む）は
+#  この種の自動注入を持たないため，既定は OFF（-Wl,-T, を使う）．
+#  «未定義のときだけ» 既定を与える（cmake/toolchain-riscv64.cmake の
+#  FMP3_EXPECTED_TOOLCHAIN_MACHINE と同じ理由．素の set() だと
+#  target.cmake 側の意図的な ON 宣言があってもここで上書きしてしまう
+#  ……というのは誤りで，実際には逆に「target.cmake がこの後 include
+#  されて ON を set() する」ので問題は起きないが，将来 -D 経由で
+#  上書きしたい場合に備えて同じ書き方に揃えておく）．
+#
+if(NOT DEFINED FMP3_LDSCRIPT_VIA_DRIVER_T)
+    set(FMP3_LDSCRIPT_VIA_DRIVER_T OFF)
+endif()
+
 include(${FMP3_TARGET_DIR}/target.cmake)
 
 #
@@ -69,25 +90,23 @@ include(${FMP3_TARGET_DIR}/target.cmake)
 #  をそのまま流用しても二重指定（ld の "linker script file '...' appears
 #  multiple times" fatal error）にならない．
 #
-#  ★asp3_core と違い，QEMU（picolibc）と実機（newlib-nano）で書式を
-#    変える必要がある（実測で確認済み）：
-#    picolibc.specs は `%{!T:-Tpicolibc.ld}` を持ち，gcc ドライバの -T
-#    スイッチが立っているかどうかだけで picolibc 既定のリンカスクリプトを
-#    追加するか判定する．-Wl,-T,<file> は -Wl 経由でリンカへそのまま
-#    転送されるだけで gcc の -T スイッチを立てないため，QEMU 側で
-#    asp3_core と同じ -Wl,-T, を使うと picolibc.ld が「も」-T されて
-#    しまう．実測（riscv64-unknown-elf-gcc 13.2.0 + picolibc 1.8.6-2，
-#    mpfs-lim.ld）：
+#  ★書式（-T か -Wl,-T, か）はターゲットが宣言する FMP3_LDSCRIPT_VIA_DRIVER_T
+#    で決める（既定 OFF＝-Wl,-T,）．汎用層（本ファイル）がターゲット固有の
+#    変数名（旧: POLARFIRE_QEMU）で直接分岐していたのは設計上の誤りだった：
+#    「picolibc の specs が gcc の -T ドライバスイッチを要求する」という
+#    知識は picolibc を使うターゲット（polarfire の QEMU/picolibc ビルド）
+#    が持つべきものであり，汎用層はターゲットが宣言した結果だけを読む．
+#    実測（riscv64-unknown-elf-gcc 13.2.0 + picolibc 1.8.6-2，mpfs-lim.ld）：
 #      -T mpfs-lim.ld          → _start = 0x08000000（l2lim．意図通り）
 #      -Wl,-T,mpfs-lim.ld のみ → _start = 0x80000000（picolibc.ld 既定）
 #    ld はエラーにせず両方の SECTIONS を受理し，後着の picolibc.ld が
 #    勝つ．**ビルドは通るのに実機では起動しない**という，fatal error
-#    より発見しにくい壊れ方をする．上流 Makefile.target:106-107 が
-#    QEMU=1 のとき素の -T を COPTS に混ぜているのも同じ理由．実機
-#    （nano.specs）にはこの罠が無いので通常どおり -Wl,-T, を使う．
+#    より発見しにくい壊れ方をする．musca_b1（newlib，picolibc 不使用）は
+#    FMP3_LDSCRIPT_VIA_DRIVER_T を一切設定しないため既定の OFF のままとなり
+#    -Wl,-T, が使われる（これが正しい）．
 #
 if(DEFINED FMP3_LDSCRIPT)
-    if(POLARFIRE_QEMU)
+    if(FMP3_LDSCRIPT_VIA_DRIVER_T)
         list(APPEND FMP3_LINK_OPTIONS -T ${FMP3_LDSCRIPT})
     else()
         list(APPEND FMP3_LINK_OPTIONS -Wl,-T,${FMP3_LDSCRIPT})
@@ -558,6 +577,35 @@ add_executable(fmp
     ${FMP3_SDK_C_FILES}
     ${FMP3_SDK_ASM_FILES}
 )
+
+#
+#  fmp 自身が直接コンパイルする C/ASM ソース（sample1.c・非TECS版システム
+#  サービス・SDK ソース等）を，offset.h / kernel_cfg.h の生成完了より前に
+#  コンパイルしてしまう競合を防ぐ．
+#
+#  libfmp3.a 側（add_library(fmp3 ...)）は既に
+#  add_dependencies(fmp3 generate_cfg_gen_files) を持つが，fmp 自身が直接
+#  コンパイルするソース（sample1.c 等，fmp3 ライブラリの外）には同じ順序
+#  依存が無かった．target_link_libraries(fmp PRIVATE fmp3 ...) はリンク時
+#  の依存しか作らず，fmp 自身のコンパイルステップの順序は保証しない．
+#
+#  この漏れは，RISC-V（polarfire）では offset.h をアセンブラ（start.S）
+#  からしか取り込まないため気付かれなかった（arch/riscv_gcc の start.S は
+#  offset.h を含まない）．一方 ARM-M では core_kernel_impl.h が
+#  （CFG1_OUT 以外で）offset.h を取り込み（arch/arm_m_gcc/common/
+#  Makefile.core:51-64、arch/arm_m_gcc/doc/arm_m_design.md:287-319），
+#  これが kernel_impl.h → target_kernel_impl.h → chip_kernel_impl.h →
+#  core_kernel_impl.h の連鎖でほぼ全 C オブジェクトに波及するため，並列
+#  ビルドでレース不具合（offset.h 不在によるコンパイル失敗）になりうる．
+#  また kernel_cfg.h（CRE_TSK 等が払い出すオブジェクトIDの #define）は
+#  arch を問わず sample1.c 自身が必要とする．
+#
+#  cfg1_out には付けない：cfg1_out.c は自身の中で TOPPERS_CFG1_OUT を
+#  #define しており（cfg/pass1.rb:785），offset.h の生成自体が cfg1_out の
+#  実行結果（.syms/.srec）を必要とするため，ここで依存させると循環になる．
+#
+add_dependencies(fmp generate_cfg_gen_files)
+
 fmp3_add_syssvc(fmp)
 
 target_include_directories(fmp
