@@ -1,0 +1,37 @@
+{
+  "version": 4,
+  "include": [
+    "../../cmake/presets-base.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "polarfire_soc_kit",
+      "inherits": "_base",
+      "displayName": "PolarFire SoC Kit (U54/RV64, 実機)",
+      "description": "実機向け。SoftConsole 同梱ツールチェーン（nano.specs）が前提",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-riscv64.cmake",
+      "cacheVariables": {
+        "FMP3_TARGET": "polarfire_soc_kit_gcc",
+        "POLARFIRE_QEMU": "OFF"
+      }
+    },
+    {
+      "name": "polarfire_soc_kit-qemu",
+      "inherits": "polarfire_soc_kit",
+      "displayName": "PolarFire SoC Kit / QEMU (microchip-icicle-kit)",
+      "description": "QEMU 実行用。picolibc を使用",
+      "cacheVariables": {
+        "POLARFIRE_QEMU": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "polarfire_soc_kit",      "configurePreset": "polarfire_soc_kit" },
+    { "name": "polarfire_soc_kit-qemu", "configurePreset": "polarfire_soc_kit-qemu" },
+    {
+      "name": "run-polarfire_soc_kit-qemu",
+      "configurePreset": "polarfire_soc_kit-qemu",
+      "targets": [ "run" ]
+    }
+  ]
+}

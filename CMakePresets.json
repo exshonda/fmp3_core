@@ -1,6 +1,11 @@
 {
-  "version": 6,
-  "configurePresets": [
-    { "name": "linux", "generator": "Ninja", "binaryDir": "build/linux" }
+  "version": 4,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "include": [
+    "target/polarfire_soc_kit_gcc/presets.json"
   ]
 }
