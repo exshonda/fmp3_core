@@ -549,7 +549,13 @@ fmp3_core のマイルストーンからは外れ、**fmp3_esp_idf 側の作業*
 - [ ] **ライブラリモードが要るか**（外部 SDK にリンクされるターゲットか）。
       要るならセクションリネームの要否と、pass3 を誰が呼ぶかを決める
 - [ ] リンカスクリプトが `.kernel_data_*` / `.stack_*` を回収するか、orphan で問題ないか、
-      それとも（esp32p4 が採った方式のように）リネームで解決するか
+      それとも（esp32p4 が採った方式のように）リネームで解決するか。
+      **クラス別セクションの扱いは現物で確認する限り4種類ある**（現物確認済み）：
+      1) polarfire＝orphan のまま（回収しない）。
+      2) kria＝`.ld` が `*(.kernel_data_*)` を明示回収。
+      3) esp32p4＝`build_fmp3_lib.sh` が objcopy で `.data.fmp*` へリネーム。
+      4) **ARM-M＝そもそもセクション名を出力しない**（`arch/arm_m_gcc/common/core_kernel.trb:26-35`
+         の `SecnameKernelData`/`SecnameStack` が無条件に `""` を返す。musca_b1 はこの4番目の型）
 - [ ] `cfg1_out` のリンクで `--gc-sections` が効いていないか
 - [ ] `arch/` 側テンプレートの有無（割込み制御器が PLIC か CLIC か等でチップ層が変わる）
 - [ ] 実行手段（QEMU / エミュレータ / 実機）と、それが要求する成果物の種類（ELF / フラッシュ像）
