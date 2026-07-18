@@ -217,10 +217,26 @@ endforeach()
 #    （タイムスタンプを更新しない）ため，.c を OUTPUT に宣言すると
 #    毎ビルド pass1 が再実行される．上流 Makefile も timestamp 方式である．
 #
-#  ★DEPFILE で .cfg が #include するヘッダを追跡する．cfg が -M で書く
+#  ★DEPFILE が追跡するのは「.cfg が INCLUDE() する別の .cfg」だけである．
+#    C ヘッダの #include は追跡しない．pristine cfg/pass1.rb は
+#    #include/#ifdef 等のプリプロセッサ指示子をパースせず（pass1.rb:624
+#    付近，$cfgFileInfo に不透明トークンとして積むだけでマクロ展開しない），
+#    cfg1_out.c へそのまま転記する（cfg1_out.c 中に文字通り #include が
+#    現れる）．-M が書く depfile へ依存が積まれるのは cfg 独自の
+#    INCLUDE("....cfg") 構文だけ（pass1.rb:705 の $dependencyFiles.push）．
+#    実測でも generated/cfg1_out_c.d に sample1.h は現れない．
+#
+#    ヘッダ変更の検出が結果的に効いて見えるのは，生成された cfg1_out.c を
+#    C コンパイラが実際にコンパイルする際の通常のヘッダ依存追跡
+#    （.c.obj.d → ninja の暗黙依存）が拾うためであり，DEPFILE とは
+#    無関係な副次効果である．したがって「pass1 だけを再実行して
+#    cfg1_out.c を作るが，それをコンパイルしない」経路（例えば
+#    pass2 の kernel_cfg.c 生成）では，この安全網は保証されない．
+#    Task 5 で kernel_cfg.c 系の依存を設計する際は，ここに同じ安全網が
+#    自動的にあると仮定しないこと．
+#
 #    depfile のターゲットは裸の "cfg1_out.timestamp" だが，CMake 3.23+ の
-#    Ninja ジェネレータが変換するため OUTPUT と一致しなくてよい（Task 5 の
-#    positive control で実証する）．
+#    Ninja ジェネレータが変換するため OUTPUT と一致しなくてよい．
 #
 add_custom_command(
     OUTPUT ${CFG1_OUT_TIMESTAMP}
@@ -275,6 +291,11 @@ endif()
 #  ★">" のシェルリダイレクトは使わない（ジェネレータ依存になるため）．
 #    cmake -E env の代わりに nm の出力を CMake 経由でファイルへ書く．
 #
+#  ★nm_to_file.cmake の直後に check_magic_number.cmake を続けて走らせる．
+#    --gc-sections/--no-gc-sections は「最後着が勝つ」暗黙の順序保証に
+#    依存しており（cfg1_out のリンクオプション参照），順序が崩れると
+#    ビルドはエラー無く成功したまま TOPPERS_magic_number だけが消える．
+#    それを cfg1_out.syms 生成の直後にここで検査し，無ければ止める。
 add_custom_command(
     OUTPUT ${CFG1_OUT_SYMS_FILE}
     COMMAND ${CMAKE_COMMAND}
@@ -282,7 +303,11 @@ add_custom_command(
             -DELF=$<TARGET_FILE:cfg1_out>
             -DOUT=${CFG1_OUT_SYMS_FILE}
             -P ${FMP3_ROOT_DIR}/cmake/nm_to_file.cmake
+    COMMAND ${CMAKE_COMMAND}
+            -DSYMS=${CFG1_OUT_SYMS_FILE}
+            -P ${FMP3_ROOT_DIR}/cmake/check_magic_number.cmake
     DEPENDS cfg1_out ${FMP3_ROOT_DIR}/cmake/nm_to_file.cmake
+            ${FMP3_ROOT_DIR}/cmake/check_magic_number.cmake
     COMMENT "Generating cfg1_out.syms"
 )
 
