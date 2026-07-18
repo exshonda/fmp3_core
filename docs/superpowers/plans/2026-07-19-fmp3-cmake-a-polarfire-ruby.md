@@ -17,7 +17,7 @@
 - ライブラリ名 `fmp3`（`libfmp3.a`）、実行ファイル名 `fmp`（拡張子なし。上流 `sample/Makefile` の `OBJNAME = fmp` に合わせる）。
 - プリセット名は `polarfire_soc_kit`（実機）/ `polarfire_soc_kit-qemu`（QEMU）。
 - 変数接頭辞は `FMP3_`。asp3_core の `ASP3_*` と同名・同義で揃える。
-- `-march` の既定は **`rv64imafd`**。上流 `arch/riscv_gcc/polarfire_soc/Makefile.chip:25` は `rv64gc` だが、Ubuntu の `picolibc-riscv64-unknown-elf` 1.8.6-2 には `rv64imafdc/lp64d` の multilib が無い（`rv64imafc` と `rv64iafd` はある）。ABI は `lp64d` のまま、圧縮命令のみ落とす。Task 1 で実測確認する。
+- `-march` の既定は **`rv64imafdc`**。上流 `arch/riscv_gcc/polarfire_soc/Makefile.chip:25` の `rv64gc` と **ISA としては同一**だが、綴りで multilib の解決先が変わる。`rv64gc` は `-print-multi-directory` が `rv64imafdc/lp64d` を返し、Ubuntu の `picolibc-riscv64-unknown-elf` 1.8.6-2 にはそのディレクトリが実在しないため `crt0.o` が見つからずリンクできない。`rv64imafdc` と綴ると既定ディレクトリ `.` に解決され、picolibc はそこに `crt0.o`/`libc.a` を置いているのでリンクできる（ツールチェーンの `-march` 既定が `rv64imafdc_zicsr` であるため）。ABI は `lp64d` のまま、**圧縮命令(C)も落とさない**（コードサイズが小さくなる。FMP3 は RAM 実行前提でサイズが効く）。Task 1 で実測確認する。
 
 ---
 
@@ -62,25 +62,44 @@
 
 Run:
 ```bash
-riscv64-unknown-elf-gcc -march=rv64gc -mabi=lp64d -print-multi-directory
+riscv64-unknown-elf-gcc -march=rv64gc     -mabi=lp64d -print-multi-directory
+riscv64-unknown-elf-gcc -march=rv64imafdc -mabi=lp64d -print-multi-directory
 ls -d /usr/lib/picolibc/riscv64-unknown-elf/lib/rv64imafdc 2>&1
+ls    /usr/lib/picolibc/riscv64-unknown-elf/lib/crt0.o
 ```
 Expected:
 ```
 rv64imafdc/lp64d
+.
 ls: cannot access '/usr/lib/picolibc/riscv64-unknown-elf/lib/rv64imafdc': No such file or directory
+/usr/lib/picolibc/riscv64-unknown-elf/lib/crt0.o
 ```
-→ **上流既定の `-march=rv64gc` では picolibc の multilib が無い**ことの確認。
+→ **同じ ISA でも綴りで multilib の解決先が変わる**ことの確認。`rv64gc` は実在しない
+`rv64imafdc/lp64d` を指し、`rv64imafdc` は既定ディレクトリ `.` を指す。picolibc は `.` に
+`crt0.o`/`libc.a` を置いている。**問題は圧縮命令(C)ではなく綴りである。**
 
-Run:
+Run（negative control と positive control を対にする）:
 ```bash
-printf '#include <string.h>\nchar b[64];\nvoid _start(void){ memcpy(b,"x",1); }\n' > /tmp/lk.c
-riscv64-unknown-elf-gcc -march=rv64imafd -mabi=lp64d -mcmodel=medany \
-  --specs=picolibc.specs -nostdlib -nostartfiles /tmp/lk.c -lc -lgcc -o /tmp/lk.elf
-echo "rc=$?"
+printf 'int main(void){ return 0; }\n' > /tmp/lk.c
+for m in rv64gc rv64imafdc; do
+  echo "=== $m ==="
+  riscv64-unknown-elf-gcc -march=$m -mabi=lp64d -mcmodel=medany \
+    --specs=picolibc.specs /tmp/lk.c -o /tmp/lk_$m.elf 2>&1 | tail -2
+  echo "rc=${PIPESTATUS[0]}"
+done
 ```
-Expected: `rc=0`（エラー出力なし）
-→ **`rv64imafd` なら通る**ことの確認。これが Global Constraints の `-march` 既定の根拠。
+Expected:
+```
+=== rv64gc ===
+...ld: cannot find /usr/lib/picolibc/riscv64-unknown-elf/lib/rv64imafdc/lp64d/crt0.o: No such file or directory
+collect2: error: ld returned 1 exit status
+rc=1
+=== rv64imafdc ===
+rc=0
+```
+→ **`rv64gc` は落ち、`rv64imafdc` は通る**ことの確認。落ちる理由が `crt0.o` の不在
+（＝multilib ディレクトリの不在）であって命令セット非対応ではないことも、このエラー文で分かる。
+これが Global Constraints の `-march` 既定の根拠。
 
 - [ ] **Step 2: 設定が通らないことを確認する（失敗の確認）**
 
@@ -346,8 +365,10 @@ git add cmake/toolchain-riscv64.cmake cmake/presets-base.json CMakePresets.json 
 git commit -m "build: CMake 骨格（ツールチェーン・presets・エントリ）を追加
 
 polarfire_soc_kit / -qemu の2プリセットで configure が通るところまで。
--march は rv64imafd を既定とする（Ubuntu の picolibc に rv64imafdc の
-multilib が無いため。ABI は lp64d のまま）。"
+-march は上流の rv64gc ではなく rv64imafdc を既定とする（ISA は同一だが，
+rv64gc は実在しない multilib ディレクトリ rv64imafdc/lp64d に解決され
+crt0.o が見つからない。rv64imafdc なら既定ディレクトリ . に解決される）。
+ABI は lp64d のまま。"
 ```
 
 ---
@@ -444,15 +465,18 @@ set(COREDIR ${FMP3_ROOT_DIR}/arch/riscv_gcc/common)
 #
 #  ISA と ABI
 #
-#  上流 Makefile.chip:25 は -march=rv64gc（＝rv64imafdc）だが，Ubuntu の
-#  picolibc-riscv64-unknown-elf 1.8.6-2 には rv64imafdc/lp64d の multilib が
-#  無いためリンクできない（rv64imafc と rv64iafd はある）．圧縮命令のみ
-#  落とした rv64imafd を既定とする．ABI は lp64d のまま変わらない．
-#  SDK の mss_entry.S:23 は .option norvc を明示しており，圧縮命令に
-#  依存していない．
+#  上流 Makefile.chip:25 は -march=rv64gc．ISA としては rv64imafdc と同一
+#  だが，綴りで multilib の解決先が変わる．rv64gc は
+#  rv64imafdc/lp64d に解決され，Ubuntu の picolibc-riscv64-unknown-elf
+#  1.8.6-2 にはそのディレクトリが実在しないため crt0.o が見つからない．
+#  rv64imafdc と綴ると既定ディレクトリ . に解決され，picolibc はそこに
+#  crt0.o/libc.a を置いているのでリンクできる（ツールチェーンの -march
+#  既定が rv64imafdc_zicsr であるため）．よって rv64imafdc を既定とする．
+#  ABI は lp64d のまま変わらず，圧縮命令(C)も維持されるのでコードサイズが
+#  小さくなる．
 #
-set(FMP3_RISCV_MARCH "rv64imafd" CACHE STRING
-    "RISC-V ISA string passed to -march (upstream default is rv64gc)")
+set(FMP3_RISCV_MARCH "rv64imafdc" CACHE STRING
+    "RISC-V ISA string passed to -march (same ISA as upstream rv64gc; this spelling resolves to picolibc's default multilib)")
 
 #
 #  C ライブラリの specs
@@ -717,7 +741,7 @@ Expected（順不同ではなくこの順で出る）:
 -- fmp3_core: FMP3_TARGET     = polarfire_soc_kit_gcc
 -- fmp3_core: FMP3_TARGET_DIR = /home/honda/TOPPERS/FMP3/fmp3_core/target/polarfire_soc_kit_gcc
 -- fmp3_core: FMP3_BOARD      = MPFS_ICICLE_KIT
--- fmp3_core: FMP3_RISCV_MARCH= rv64imafd
+-- fmp3_core: FMP3_RISCV_MARCH= rv64imafdc
 -- fmp3_core: FMP3_RISCV_SPECS= --specs=picolibc.specs
 -- fmp3_core: FMP3_PRC_NUM    = ''
 -- fmp3_core: FMP3_COMPILE_DEFS= TOPPERS_USE_QEMU;MPFS_ICICLE_KIT;TOPPERS_OMIT_BSS_INIT;TOPPERS_OMIT_DATA_INIT;TOPPERS_OMIT_TECS
@@ -1055,7 +1079,7 @@ Expected: `1`
 Run:
 ```bash
 cd build/polarfire_soc_kit-qemu
-riscv64-unknown-elf-gcc -march=rv64imafd -mabi=lp64d -mcmodel=medany \
+riscv64-unknown-elf-gcc -march=rv64imafdc -mabi=lp64d -mcmodel=medany \
   --specs=picolibc.specs -nostdlib -nostartfiles -Wl,--gc-sections \
   -T ../../target/polarfire_soc_kit_gcc/sdk/boards/icicle-kit-es/platform_config/lim-debug/linker/mpfs-lim.ld \
   CMakeFiles/cfg1_out.dir/generated/cfg1_out.c.o \
@@ -1582,7 +1606,7 @@ Expected: `ninja: error: unknown target 'run'`
 `DIVERGENCE_MAP.md` の表に以下の3行を追加する（既存の `cfg/` と `target/` の行の後）:
 ```markdown
 | arch/riscv_gcc/common/arch.cmake | add | Makefile.core の CMake 版。上流の Makefile は残すが CMake ビルドからは参照しない | - |
-| arch/riscv_gcc/polarfire_soc/chip.cmake | add | Makefile.chip の CMake 版。`-march` は上流の `rv64gc` ではなく `rv64imafd`（Ubuntu の picolibc に `rv64imafdc/lp64d` の multilib が無いため。ABI は `lp64d` のまま） | 未 |
+| arch/riscv_gcc/polarfire_soc/chip.cmake | add | Makefile.chip の CMake 版。`-march` は上流の `rv64gc` ではなく `rv64imafdc`（ISA は同一。`rv64gc` は実在しない multilib ディレクトリ `rv64imafdc/lp64d` に解決され `crt0.o` が見つからないが、`rv64imafdc` は既定ディレクトリ `.` に解決される。ABI は `lp64d` のまま） | 未 |
 | target/polarfire_soc_kit_gcc/{target.cmake,presets.json} | add | Makefile.target の CMake 版。Microchip SDK のソース16個を最終リンクに加える | - |
 ```
 
