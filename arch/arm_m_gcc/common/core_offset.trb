@@ -1,0 +1,29 @@
+# -*- coding: utf-8 -*-
+#
+#		オフセットファイル生成用Rubyテンプレート（ARM-M用）
+#
+
+#
+#  ターゲット非依存部のインクルード
+#
+IncludeTrb("kernel/genoffset.trb")
+
+#
+#  フィールドのオフセットの定義の生成
+#
+$offsetH.append(<<EOS)
+#define TCB_p_tinib		#{$offsetof_TCB_p_tinib}
+#define TCB_pc			#{$offsetof_TCB_pc}
+#define TCB_sp			#{$offsetof_TCB_sp}
+#define TCB_stk_top		#{$offsetof_TCB_stk_top}
+#define TCB_fpu_flag		#{$offsetof_TCB_fpu_flag}
+#define TINIB_exinf		#{$offsetof_TINIB_exinf}
+#define TINIB_task		#{$offsetof_TINIB_task}
+#define TINIB_stk_bottom	#{$offsetof_TINIB_TSKINICTXB_stk_bottom}
+#define PCB_p_runtsk		#{$offsetof_PCB_p_runtsk}
+#define PCB_p_schedtsk		#{$offsetof_PCB_p_schedtsk}
+#define PCB_idstkpt		#{$offsetof_PCB_idstkpt}
+#define PCB_idstktop		#{$offsetof_PCB_idstktop}
+#define PCB_lock_flag		#{$offsetof_PCB_lock_flag}
+#define PCB_target_pcb		#{$offsetof_PCB_target_pcb}
+EOS

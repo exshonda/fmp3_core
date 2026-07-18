@@ -1,0 +1,11 @@
+# -*- coding: utf-8 -*-
+#
+#		チェックパスの生成スクリプトのターゲット依存部
+#
+#  $Id: target_check.trb 213 2020-02-15 17:11:06Z ertl-honda $
+#
+
+#
+#  生成スクリプトのコア依存部（チップ依存部は飛ばす）
+#
+IncludeTrb("core_check.trb")

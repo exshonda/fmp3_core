@@ -1,0 +1,90 @@
+# arm64.c
+icache_invalidate_all
+icache_flush
+dcache_flush
+cache_flush
+icache_enable
+icache_disable
+dcache_enable
+dcache_disable
+cache_enable
+cache_disable
+tlb_invalidate_all
+mmu_mmap_init
+mmu_mmap_add
+mmu_tt_init
+mmu_init
+
+# core_support.S
+vector_table
+dispatch
+dispatch_and_migrate
+exit_and_migrate
+start_dispatch
+exit_and_dispatch
+call_exit_kernel
+start_r
+cur_sp0_sync_handler
+cur_sp0_irq_handler
+cur_sp0_fiq_handler
+cur_sp0_serr_handler
+cur_spx_irq_handler
+cur_spx_sync_handler
+cur_spx_fiq_handler
+cur_spx_serr_handler
+l64_sync_handler
+l64_irq_handler
+l64_fiq_handler
+l64_serr_handler
+l32_sync_handler
+l32_irq_handler
+l32_fiq_handler
+l32_serr_handler
+dcache_invalidate_all
+dcache_clean_and_invalidate_all
+
+# core_kernel_impl.c
+core_mprc_initialize
+core_initialize
+core_terminate
+initialize_exception
+xlog_sys
+default_exc_handler
+default_int_handler
+arm_fpu_initialize
+
+# core_kernel_impl.h
+lock_cpu
+unlock_cpu
+sense_lock
+
+# kernel_cfg.c
+p_inh_table
+p_intcfg_table
+p_exc_table
+idstkpt_table
+
+# gic_kernel_impl.c
+gic_init
+gicc_stop
+gicd_disable_int
+gicd_enable_int
+gicd_clear_pending
+gicd_set_pending
+gicd_probe_pending
+gicd_config
+gicd_set_priority
+gicd_set_target
+gicd_initialize
+gicd_terminate
+initialize_interrupt
+
+# gic_support.S
+irc_begin_int
+irc_end_int
+irc_get_intpri
+irc_begin_exc
+irc_end_exc
+
+# psci_support.S
+psci_smc_cpuon

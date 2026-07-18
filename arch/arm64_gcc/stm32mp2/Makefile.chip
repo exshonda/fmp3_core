@@ -1,0 +1,52 @@
+#
+#		Makefile のチップ依存部(STM32MP2用)
+#
+
+#
+#  チップ依存部ディレクトリ名の定義
+#
+CHIPDIR = $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)
+
+#
+#  コンパイルオプション
+#
+COPTS := $(COPTS) -mcpu=cortex-a35
+LDFLAGS := $(LDFLAGS) -mcpu=cortex-a35
+CDEFS := $(CDEFS) -DTOPPERS_CORTEX_A35
+#  セキュア(Group0)割込みは FIQ で配送し，CPUロックを FIQ マスク(DAIF_F_BIT)にする
+#  (chip_kernel.h, TOPPERS_TZ_S 時)．これがネイティブな GICv2+Secure 構成で zynqmp と同じ．
+#  割込みハンドラ前半の daifclr は FIQ(=CPUロック)を保持するので暴走再入は起きない．
+#  GIC_NO_FIQ_IN_SECURE(=FIQEN を立てず IRQ 配送に切替える回避策)は不要(実機 STM32MP257F-DK で実証)．
+
+INCLUDES := $(INCLUDES) -I$(CHIPDIR)
+LDFLAGS := $(LDFLAGS) -N
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(CHIPDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) chip_kernel_impl.o
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS)
+
+#
+#  システムサービスに関する定義
+#
+SYSSVC_DIRS := $(SYSSVC_DIRS) $(CHIPDIR)
+
+#
+#  スタートアップモジュールに関する定義
+#
+#  START_OBJSをstart.oに設定し，LDFLAGSに-nostdlibを追加する．
+#
+START_OBJS := start.o $(START_OBJS)
+START_OBJS := $(addprefix $(OBJDIR)/, $(START_OBJS))
+
+$(START_OBJS): $(OBJDIR)/%.o: %.S
+	$(CC) -c -o $@ -MD -MP -MF $(DEPDIR)/$*.d $(CFLAGS) $(KERNEL_CFLAGS) $<
+
+LDFLAGS := -nostdlib $(LDFLAGS)
+
+#
+#  コア依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/common/Makefile.core

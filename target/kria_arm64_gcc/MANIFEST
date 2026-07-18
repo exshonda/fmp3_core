@@ -1,0 +1,37 @@
+PACKAGE fmp3_target_kria_arm64_gcc
+VERSION 3.4.0
+
+E_PACKAGE
+Makefile.target
+MANIFEST
+target_asm.inc
+target_cfg1_out.h
+target_check.trb
+target_class.trb
+target_ipi.cfg
+target_ipi.h
+target_kernel.cfg
+target_kernel.h
+target_kernel.trb
+target_kernel_impl.c
+target_kernel_impl.h
+target_mmu_config.h
+target_rename.def
+target_rename.h
+target_serial.cfg
+target_serial.h
+target_sil.h
+target_stddef.h
+target_syssvc.h
+target_test.h
+target_timer.cfg
+target_timer.h
+target_unrename.h
+target_user.txt
+tools/jtag/jtag_a53_kria_attach.tcl
+tools/jtag/jtag_a53_kria.tcl
+tools/jtag/jtag_a53_64.tcl
+tools/jtag/psu_init_kria.tcl
+tools/jtag/run_ttsp_kria.sh
+kria.h
+kria.ld

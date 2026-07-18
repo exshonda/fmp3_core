@@ -1,0 +1,33 @@
+# -*- coding: utf-8 -*-
+#
+#		オフセットファイル生成用Rubyテンプレート（ARM用）
+#
+#  $Id: core_offset.trb 209 2020-01-30 09:59:08Z ertl-honda $
+#
+
+#
+#  ターゲット非依存部のインクルード
+#
+IncludeTrb("kernel/genoffset.trb")
+
+#
+#  フィールドのオフセットの定義の生成
+#
+$offsetH.append(<<EOS)
+#define TCB_p_tinib		#{$offsetof_TCB_p_tinib}
+#define TCB_sp			#{$offsetof_TCB_sp}
+#define TCB_pc			#{$offsetof_TCB_pc}
+#define TINIB_tskatr	#{$offsetof_TINIB_tskatr}
+#define TINIB_exinf		#{$offsetof_TINIB_exinf}
+#define TINIB_task		#{$offsetof_TINIB_task}
+#define TINIB_stksz		#{$offsetof_TINIB_stksz}
+#define TINIB_stk		#{$offsetof_TINIB_stk}
+#define T_EXCINF_cpsr	#{$offsetof_T_EXCINF_cpsr}
+#define PCB_p_runtsk	#{$offsetof_PCB_p_runtsk}
+#define PCB_p_schedtsk	#{$offsetof_PCB_p_schedtsk}
+#define PCB_excpt_nest_count	#{$offsetof_PCB_excpt_nest_count}
+#define PCB_istkpt		#{$offsetof_PCB_istkpt}
+#define PCB_idstkpt		#{$offsetof_PCB_idstkpt}
+#define PCB_p_exc_tbl	#{$offsetof_PCB_p_exc_tbl}
+#define PCB_p_inh_tbl	#{$offsetof_PCB_p_inh_tbl}
+EOS

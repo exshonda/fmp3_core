@@ -1,0 +1,117 @@
+#
+#    Makefile のチップ依存部（ESP32-P4 用）
+#    polarfire_soc 版をベースに ESP32-P4(RV32IMAFC, CLIC) 向けに改変
+#
+
+#
+#  GNU開発環境のターゲットアーキテクチャの定義
+#    ESP-IDF 同梱の riscv32-esp-elf ツールチェーンを使用
+#
+GCC_TARGET = riscv32-esp-elf
+
+#
+#  チップ依存部ディレクトリ名の定義
+#
+CHIPDIR = $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)
+
+#
+#  コンパイルオプション
+#
+INCLUDES := $(INCLUDES) -I$(CHIPDIR)
+#  使用するCライブラリのspecs．SoftConsole付属のnewlib-nano環境では
+#  nano.specsが標準だが，picolibcベースのツールチェーン等に合わせて
+#  外部から SPECS=... で上書きできるようにしている．
+SPECS ?= --specs=nano.specs
+#  ESP32-P4: RV32IMAFC．start.S が fscsr/mstatus.FS を無条件で操作するため
+#  F 命令を許可する必要があり -march に f を含める．
+#  ABI は ilp32f(single-float)とする: ESP-IDF が ilp32f でビルドされており，方式(a)で
+#  FMP3 を IDF アプリへ静的リンクするには ABI を一致させる必要がある(soft-float の ilp32
+#  とは "can't link soft-float modules with single-float modules" で混在不可)．
+#  FPU(F拡張)コンテキスト退避は共通部 core_support.S が #ifdef __riscv_flen で実装済み
+#  (ilp32f では __riscv_flen が自動定義される)．ABI 準拠の分割退避になっており，
+#  ディスパッチで callee-saved FP(fs0-fs11=12本)を，割込み/例外入口で caller-saved FP
+#  (ft0-ft11+fa0-fa7=20本, TNUM_RISCV_INT_FREG)を退避するため，プリエンプトを含め FP を
+#  使う複数タスクは安全に切替わる(チップ依存部での追加退避は不要)．
+#  制限: fcsr(丸めモード/例外フラグ)はタスク毎には退避せず start.S が全体で 1 回設定する
+#  のみ．タスク毎に丸めモードを変える用途がある場合のみ別途対応が要る．
+#  セクション分割オプション．標準(standalone)は関数/データ単位に分割し
+#  --gc-sections で削減する．方式(a)で IDF へ静的リンクし FMP3 全 text を
+#  IRAM へ再配置する場合は obj 毎に単一 .text にしたいので，ビルド側から
+#  `make SECTION_OPTS=-fno-function-sections` で上書きできるようにする．
+SECTION_OPTS ?= -ffunction-sections -fdata-sections
+#  -march: PIE(esp.* 命令)用に xesppie 拡張を含める(IDF esp32p4 と同一指定)．
+#    zicsr/zifencei は従来 rv32imafc に暗黙だったものを明示(挙動不変)．xesppie で
+#    chip_asm.inc の pie_push/pie_pop の esp.* がアセンブル可能になる．
+COPTS := $(COPTS) -march=rv32imafc_zicsr_zifencei_xesppie -mabi=ilp32f -mcmodel=medany -msmall-data-limit=8 \
+         -mstrict-align -mno-save-restore -fsigned-char \
+         $(SECTION_OPTS) $(SPECS)
+LDFLAGS := $(LDFLAGS) -nostartfiles
+#  CLIC は非ベクタ(ダイレクト)トラップで使用する（core_int_entry が mcause で
+#  割込み/例外を振り分ける）．
+#  USE_RISCV_DIRECT_TRAP: mtvec ダイレクトモードのトラップ入口(単一入口 +
+#    mscratch 退避による割込み/例外振り分け)．
+#  (CLIC 固有処理は #ifdef ではなく，チップのオブジェクト/フック選択で実現する:
+#   mil 復帰=irc_end_int, 例外番号抽出=core_get_exccode_asm マクロ,
+#   storm breaker=clic_kernel_impl.h．共通部に CLIC の #ifdef は持たない．)
+CDEFS := $(CDEFS) -DUSE_RISCV_DIRECT_TRAP
+#  TOPPERS_SUPPORT_TLS: タスク実行開始時(start_r)の TLS(スレッドローカルストレージ)
+#    初期化(tp設定)を有効化．picolibc の rand() 等 TLS 依存 libc 関数を使うと
+#    tp 未初期化(=0)で Load access fault になるため常時有効(ESP32-S31 で発見・
+#    実装した修正を移植．詳細は chip_asm.inc の init_additional_regs_start_r，
+#    経緯は esp32_s31 リポジトリの docs/esp32s31_bringup_checklist.md 参照．
+#    2026-07-09 時点で S31 実機確認済みだが P4 実機は未検証)．
+CDEFS := $(CDEFS) -DTOPPERS_SUPPORT_TLS
+#  NO_COPROC=1 でコプロセッサ(HWLP/PIE)文脈管理を無効化する．
+#    コプロセッサを使わない構成，および性能比較の「normal(コプロ退避なし)」基準ビルド用．
+#    `make NO_COPROC=1`(方式aビルドでは NO_COPROC=1 を伝播)．
+ifndef NO_COPROC
+#  TOPPERS_SUPPORT_HWLP: HWLP(ハードウェアループ)コプロセッサ文脈管理を有効化する
+#    単一スイッチ(設計: pie_hwlp_design.md)．eager 無条件方式で
+#    タスクディスパッチ時にループ CSR(0x7C6-0x7CB)を退避復帰する．start.S が 0x7F1=CLEAN で常時有効化し，
+#    start_r が新規タスクのループ CSR をゼロ化する(共通部は #ifdef ガードで他ターゲット無影響)．
+CDEFS := $(CDEFS) -DTOPPERS_SUPPORT_HWLP
+#  TOPPERS_SUPPORT_PIE: PIEコプロセッサコンテキスト管理を有効化．
+#    既定(eager): タスクディスパッチ時に PIE 状態(216B)を退避復帰する(chip_asm.inc の pie_push/pie_pop)．
+#    hardware_init_hook が 0x7F2 を enable にして esp.* 命令を合法化する．
+CDEFS := $(CDEFS) -DTOPPERS_SUPPORT_PIE
+#  TOPPERS_PIE_LAZY: PIE を遅延オーナ方式(lazy)で管理する(既定=未定義=eager)．
+#    切替コストを csrwi 1 に削減(非PIEタスクの毎切替 216B を解消)．ディスパッチ先のタスクの復元で 0x7F2 のみ
+#    管理し，非オーナの初回 PIE 命令を illegal トラップさせて pie_exc_handler で退避/復元，
+#    移行時は save_context フックで flush する(設計: pie_hwlp_design.md §9.2)．
+#    有効化には `make PIE_LAZY=1`(または方式aビルドで PIE_LAZY=1 を伝播)し，アプリ cfg に
+#    DEF_EXC(EXCNO_IINST, pie_exc_handler) を PE 毎登録すること．両立制約: illegal-instruction を
+#    PIE トラップに転用するため，アプリ独自の EXCNO_IINST ハンドラ/cpuexc テストとは同一ビルド不可．
+#    NO_COPROC=1 のときは PIE 自体が無効のため PIE_LAZY は無視する(ifndef NO_COPROC 内に置く．
+#    外に置くと TOPPERS_PIE_LAZY のみ定義され chip_kernel_impl.c が chip_support.S に無い
+#    pie_save_regs を参照してリンクエラーになる)．
+ifdef PIE_LAZY
+CDEFS := $(CDEFS) -DTOPPERS_PIE_LAZY
+endif
+endif
+
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(CHIPDIR)
+#  ESP32-P4 は PLIC を持たず CLIC + 割込みマトリクスを使うため
+#  plic_kernel_impl.o の代わりに新規 clic_kernel_impl.o をリンクする
+KERNEL_COBJS := $(KERNEL_COBJS) chip_kernel_impl.o clic_kernel_impl.o msi_ipi.o
+#  Machineタイマ（mtimer.o）のリンク
+#    OMIT_MTIMERが定義されている場合（例：タイマドライバシミュレータ用
+#    ターゲット simtimer_polarfire_soc_kit_gcc）はリンクしない．未定義時は
+#    従来通りmtimer.oをリンクする（既存ターゲットに影響しない）．
+ifndef OMIT_MTIMER
+KERNEL_COBJS := $(KERNEL_COBJS) mtimer.o
+endif
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS) chip_support.o
+
+#
+#  システムサービスに関する定義
+#
+SYSSVC_DIRS := $(SYSSVC_DIRS) $(CHIPDIR)
+
+#
+#  コア依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/common/Makefile.core

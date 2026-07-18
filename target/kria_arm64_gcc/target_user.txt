@@ -1,0 +1,232 @@
+=====================================================================
+                  KRIA SOM(A53/AArch64)ターゲット依存部
+                            2024-2026 (C) Shinya Honda honda@ertl.jp
+                                  Last Modified:2026 Jun 20 00:00:00
+=====================================================================
+
+○概要
+
+KRIA SOM依存部は，AMD（Xilinx）社のKria SOMファミリ（Zynq Ultrascale+
+MPSoC）のCortex-A53のAArch64モードをサポートしている．サポートしている
+プロセッサ数は，1～4個であり，ディフォルトでは4個で動作する．チップ依存
+部（arch/arm64_gcc/zynqmp）は zcu102_arm64_gcc と共用する．
+
+対応バージョンはFMP3 Release 3.4.0である．
+
+現状サポートしているボードは次の通りである．
+
+●ボード
+
+動作確認を行ったボードは次の通りである．Kria SOMファミリの以下3ボードを
+1つの依存部でカバーする．
+
+・AMD Kria KR260 Robotics Starter Kit （K26 SOM）
+・AMD Kria KV260 Vision AI Starter Kit （K26 SOM）
+・AMD Kria KD240 Drives Starter Kit    （K24 SOM）
+
+いずれも Zynq UltraScale+，Quad Cortex-A53，GIC-400（GICv2）でPSは同一で
+ある．3ボードは実機検証の結果，命名以外の機能差分がゼロ（メモリマップ／
+SIOP／タイマ／割込みすべて同一，タイマ基準も実測で3ボード一致≈100MHz）で
+あることを確認している．したがってビルド時の差は起動バナー名のみとし，make
+変数 BOARD=kr260|kv260|kd240 で切替える（Makefile.targetが -DTOPPERS_KRIA_
+<BOARD> を定義，target_syssvc.h が TARGET_NAME を選択）．既定は kr260，不正
+値は $(error)．BOARD は configure.rb ではなく make に渡す（make BOARD=kd240
+等）．TTSP3ランナー tools/jtag/run_ttsp_kria.sh は接続中のcarrier cardから
+BOARDを自動判別する．
+
+● Vitis, PetaLinux
+
+動作確認したバージョンは次の通りである．
+
+  Vitis 2024.2／2025.2.1（xsct／hw_server，実機JTAG）
+  PetaLinux 2023.2
+
+●コンパイラ
+
+動作確認を行ったARMから公開されているGCCである．
+
+   aarch64-none-eabi-gcc.exe   
+   gcc version 11.2.1 20220111 (GNU Toolchain for the Arm Architecture 11.2-2022.02 (arm-11.14))
+
+●デバッグ環境
+
+デバッグ環境としては，京都マイクロコンピュータ製のPartner-Jet2 による
+デバッグの動作確認を行った．
+
+●実行環境
+
+Partner-Jet2を使用する場合は，本カーネルはPLLやDDR等の初期化はu-bootで
+実施することを前提としている．
+
+実行・デバッグ手法については，FMPの以下のパッケージ
+
+Zynq UltraScale+ MPSoC Cortex-R5 (Xilinx社) 簡易パッケージ 
+
+の以下のフォルダを参考のこと．
+
+../zynqmp_r5_gcc/doc/tools.txt
+
+●実機実行手法（JTAG / xsct, Kria SOMファミリ）
+
+Kria（KR260/KV260/KD240）はJTAGブートモードを持たず，電源投入で必ずSOMの
+QSPI/SDブート（FSBL→PMU→BL31→U-Boot）が実行され，FSBLがPLL/クロック/DDR/
+UART等のPS初期化を完了する．したがって本カーネルをJTAGから実機起動する際
+は，u-bootと同様にFSBLによる初期化を前提とし，以下の手順を用いる．
+
+【重要】必ずクリーンなU-Boot起動状態（コンソールに ZynqMP> 等が出る＝
+DDR+PS+GIC+タイマ初期化済）にしてからJTAGロードすること．OS半起動／不定
+状態だと，GICレジスタが正常時と一致していてもタイマ割込みが発火せず，バナ
+ー〜local_inirtn直後で停止する事象を確認している（port コードのバグではな
+くボード起動前状態が原因）．
+
+  (1) 電源投入後，QSPIブートをU-Bootまで完走させDDRを初期化済みにしておく．
+  (2) xsct から hw_server へ接続し，使用するA53コアを停止して
+      「rst -processor」（コアのみのリセット．DDRは保持）を行う．
+  (3) ELF を A53#0 に dow（FSBL初期化済みのDDRへロード），他コアに memmap，
+      各コアの PC をエントリ（0x0）に設定して con で実行開始する．
+
+【重要】このターゲットでは「rst -system」および psu_init（reset_apu 含む）を
+使用してはならない．rst -system はQSPIからの再ブートを誘発し，かつDDRコント
+ローラをリセットするため，JTAG操作がFSBLのDDR初期化完了前に割り込むとDDRが
+未初期化状態となりロード不能（"DDR controller is not initialized"）に陥る．
+psu_init（XSA同梱）はSERDES PLLロック待ちでタイムアウトするうえ不要である．
+
+【最重要・NOOUTの最頻原因】起動するA53コア数は，必ずバイナリの TNUM_PRCID
+（＝ビルド時の PRC_NUM）と一致させること．_kernel_barrier_sync は起動時に
+TNUM_PRCID 個の全プロセッサがバリアに到達するまでマスタ（A53#0）を待たせ，
+このバリア到達はバナー出力よりも前に行われる．したがって起動コア数が TNUM_
+PRCID より少ないと，マスタがバリアで永久待ちとなり，バナーが1文字も出力され
+ず「コンソール無反応（NOOUT）」に見える．これはボード／UART／JTAGの故障では
+なく，起動コア数の不足である（実機で確認．PCが _kernel_barrier_sync 内の
+sil_dly_nse ループに留まり，UARTレジスタはFSBL値のまま未初期化＝serial 初期化
+にも未到達となる）．
+  ・PRC_NUM を指定せずビルドしたもの（sample1 等）は既定 TNUM_PRCID=4 のため
+    「4コア起動」が必須である（target_kernel.h の #ifndef TNUM_PRCID → 4）．
+  ・機能テスト等は PRC_NUM=1 でビルドし「1コア起動」，MP系は PRC_NUM=2 で
+    「2コア起動」する．
+  ・後述の make run はこの起動コア数（NCORES）を PRC_NUM から自動導出する
+    （未指定時は 4）ため，通常はこの不一致を意識しなくてよい．手動で
+    jtag_a53_kria_attach.tcl を叩く場合は第3引数 ncores を TNUM_PRCID に
+    一致させること．
+
+JTAG起動スクリプトの例は本ターゲットの以下に置く．
+  tools/jtag/jtag_a53_kria.tcl         （hw_server 自動起動・初回起動用）
+  tools/jtag/jtag_a53_kria_attach.tcl  （常駐 hw_server へ attach・連続実行用）
+  tools/jtag/psu_init_kria.tcl         （XSA由来．本手法では未使用）
+
+○make による実機実行・コンソール（Makefile.target が提供）
+
+上記手順を make ルールにまとめてある．ビルドディレクトリ（<OBJ>）で，事前に
+make でビルド済みのうえ，別端末で2つに分けて使う（xsct/hw_server には Vitis の
+bin へ PATH を通しておくこと）．
+
+  make console    UART1 コンソール（carrier card の USB シリアル intf=01）を
+                  自動検出して開く（picocom/cu を自動選択）．デバイスノード番号
+                  の変動に依らず model+intf で特定する．TTY=/dev/ttyUSBn で明示可．
+  make run        hw_server（未起動なら自動起動・常駐）へ attach し，NCORES 個の
+                  A53 コアを 停止→rst-processor→dow→con で起動する（gdb 不要）．
+                  ★NCORES は PRC_NUM から自動導出される（未指定時は 4）ので，
+                  起動コア数と TNUM_PRCID の不一致（前述のNOOUT原因）を防げる．
+  make hwserver   hw_server を前面起動（通常は run が自動起動するので不要）．
+  make jtaggdb    gdb.ini で aarch64 gdb を起動しソースデバッグ（要 hw_server）．
+
+  典型的な使い方（2端末）:
+    端末A: cd <OBJ>; make console            # コンソールを開いて待つ
+    端末B: cd <OBJ>; make run                # 実機起動（バナーが端末Aに出る）
+  上書き可能な変数: ELF, ENTRY, NCORES, TTY, BAUD, XSCT, HW_SERVER．
+  ★事前にクリーンな U-Boot 起動状態（コンソールに ZynqMP>）にしておくこと．
+
+TTSP3 テストスイートの実機実行手順，および実際にハマった落とし穴（rst -system
+禁止，DDR復旧，USBノード番号の変動，hw_server常駐，キャプチャ取りこぼし，連続
+実行時のwedge回避，タイマPPIのカーネル修正 等）の詳細は，本ターゲット直下の
+次のドキュメントにまとめてある．次に作業する際は必ず参照のこと．
+
+  TTSP3_HOWTO.md                        （実機TTSP3実行手順＋落とし穴と対策）
+  tools/jtag/run_ttsp_kria.sh          （上記手順を内包したスイート実行スクリプト）
+
+コンソールは PS UART1（KR260 オンボード FT4232H 経由の USB シリアル）に出力
+される．ホスト側のデバイスノード番号（/dev/ttyUSBn）はUSB列挙順で変動しうる
+ため，シリアル番号と USB インタフェース番号（intf=01）で特定すること．
+
+なお，システムリセットを介さずに連続でカーネルを再ロードする運用では，前回
+実行で残ったタイマ割込み（Secure物理タイマ PPI INTID29）のアクティブ状態が
+GIC CPUインタフェースに残存しタイマが停止する問題があったが，arm64コア依存部
+（arch/arm64_gcc/common/gic_kernel_impl.c の gic_sgi_ppi_init）でPPIのアクティ
+ブをクリアするよう修正済みである（doc/changelog/CHANGELOG_3.4.0.md 参照）．
+
+●プロセッサ数
+
+実行環境・デバッグ環境としては， Xilnx SDK 付属の xsctないし，京都マイ
+クロコンピュータ製のPartner-Jet2，QEMU をサポートしている．
+
+
+○システム構築手順
+
+ZYNQMP_A53用のFMP3カーネルを構築する手順は，「TOPPERS/FMP3カーネル ユ
+ーザーズマニュアル」の「３．クイックスタートガイド」の章に記述されてい
+る通りである．
+
+シリアルドライバを使用する際には以下のオプションでシリアルドライバと各
+種システムサービスをビルド対象とする．
+
+configure.rb -T kria_arm64_gcc -w -S "syslog.o banner.o serial.o serial_cfg.o chip_serial.o logtask.o xuartps.o"
+
+
+○カーネルの使用リソース
+
+プロセッサ毎にカーネルは以下のリソースを使用する．
+
+・タイマ
+  内蔵のジェネリックタイマーを使用する．
+  
+・UART
+  Makefile.target の以下のマクロによって設定可能である．
+  ポート数
+   TNUM_SIOP = 1 or 2
+   
+  SIOP0(ポート) とするXUART
+   SIOP0 = XUART0 or  XUART1 
+  
+・プロセッサ間割込み
+  0番と1番のプロセッサ間割込みを使用する．
+
+・メモリ
+  DDRを使用．
+  VECTOR    : 0x00000000 
+  TEXT/DATA : 0x00100000
+
+
+○変更履歴
+
+2026/07/18
+・Makefile.target に実機実行・コンソール支援ルール（make console / make run /
+  make hwserver / make jtaggdb）を追加．make run は起動A53コア数 NCORES を
+  PRC_NUM から自動導出する（未指定時は既定 TNUM_PRCID=4 に一致）．
+・「起動コア数と TNUM_PRCID の不一致で barrier_sync が永久待ちとなりバナー
+  無出力（NOOUT）に見える」最頻の落とし穴を本ドキュメントに明記（実機で真因
+  を特定．ボード／UARTの故障ではない）．
+
+2023/03/28
+・最初のリリース
+
+2026/06/19
+・Kria SOMファミリ共通ターゲット kria_arm64_gcc に統合・一般化．対応ボード
+  を KR260／KV260（K26 SOM）／KD240（K24 SOM）とした（旧 kr260_arm64_gcc を
+  置換）．3ボードは命名以外の機能差分ゼロであり，ビルド時の差は起動バナー名
+  のみ（make BOARD=kr260|kv260|kd240，既定kr260）．チップ依存部 arch/arm64_
+  gcc/zynqmp は zcu102_arm64_gcc と共用．
+・3ボードとも実機（クリーンなU-Boot起動状態）で PRC_NUM=1 起動／PRC_NUM=2
+  SMP起動／TTSP3主要テスト（task1/flg1/dtq1/mpf1/cyclic1）5/5 PASS を確認．
+  詳細は doc/changelog/CHANGELOG_3.4.0.md を参照．
+
+2026/06/14
+・FMP3 3.4.0 へ移植し，KR260 Starter Kit 実機で TTSP3 テストスイート
+  （PRC_NUM=2，約49テスト）を全 PASS/DONE・FAIL なしで確認．
+・Kria固有のJTAG実機起動手法（rst -system/psu_init を用いず，FSBL初期化済
+  DDRへ rst -processor + dow で起動）を確立し，本ドキュメントに記載．
+・arm64コア依存部の不具合修正（GIC PPIアクティブ状態クリア）を適用．本修正
+  によりシステムリセットを介さない連続再ロード起動でも時間イベント（アラーム
+  ／周期ハンドラ／タイムアウト）が正しく発火するようになった．
+  詳細は doc/changelog/CHANGELOG_3.4.0.md を参照．
+
+以上．

@@ -1,0 +1,14 @@
+# target_kernel_impl.c
+target_mprc_initialize
+target_initialize
+target_exit
+
+# target_timer.c
+target_hrt_initialize
+target_hrt_terminate
+hrt_get_current_body
+hrt_set_event_body
+hrt_raise_event_body
+hrt_clear_event_body
+
+INCLUDE "chip"

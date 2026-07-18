@@ -1,0 +1,21 @@
+PACKAGE fmp3_arch_arm_gcc_zynq7000
+VERSION 3.3.0
+
+MANIFEST
+Makefile.chip
+chip_kernel.h
+chip_kernel.trb
+chip_kernel_impl.c
+chip_kernel_impl.h
+chip_rename.def
+chip_rename.h
+chip_serial.c
+chip_serial.cfg
+chip_serial.h
+chip_stddef.h
+chip_timer.cfg
+chip_timer.h
+chip_unrename.h
+xuartps.c
+xuartps.h
+zynq7000.h

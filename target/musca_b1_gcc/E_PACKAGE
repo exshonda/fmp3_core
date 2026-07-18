@@ -1,0 +1,7 @@
+E_PACKAGE fmp3_musca_b1_gcc
+VERSION %date
+
+INCLUDE ../../MANIFEST
+INCLUDE ../../arch/arm_m_gcc/MANIFEST
+INCLUDE ../../arch/arm_m_gcc/musca_b1/MANIFEST
+INCLUDE MANIFEST

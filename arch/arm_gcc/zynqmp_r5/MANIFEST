@@ -1,0 +1,24 @@
+PACKAGE fmp3_arch_arm_gcc_zynqmp_r5
+VERSION 3.4.0
+
+MANIFEST
+Makefile.chip
+chip_kernel.h
+chip_kernel.trb
+chip_kernel_impl.c
+chip_kernel_impl.h
+chip_rename.def
+chip_rename.h
+chip_serial.c
+chip_serial.cfg
+chip_serial.h
+chip_stddef.h
+chip_support.S
+chip_timer.cfg
+chip_timer.h
+chip_unrename.h
+chip_user.txt
+ttc_hrt.c
+xuartps.c
+xuartps.h
+zynqmp_r5.h

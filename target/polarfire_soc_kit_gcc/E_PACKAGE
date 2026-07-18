@@ -1,0 +1,7 @@
+E_PACKAGE fmp3_polarfire_soc_kit_gcc
+VERSION %date
+
+INCLUDE ../../MANIFEST
+INCLUDE ../../arch/riscv_gcc/MANIFEST
+INCLUDE ../../arch/riscv_gcc/polarfire_soc/MANIFEST
+INCLUDE MANIFEST

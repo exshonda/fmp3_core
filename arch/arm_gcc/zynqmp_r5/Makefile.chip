@@ -1,0 +1,47 @@
+#
+#		Makefile のチップ依存部（ZynqMP RPU用）
+#
+#  $Id$
+#
+
+#
+#  チップ依存部ディレクトリ名の定義
+#
+CHIPDIR = $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)
+
+#
+#  コンパイルオプション
+#
+#  Cortex-R5（Rプロファイル）向けの定義を行う．FPU関連のオプションは
+#  ターゲット依存部（Makefile.target）で指定する．
+#
+INCLUDES := $(INCLUDES) -I$(CHIPDIR)
+COPTS := $(COPTS) -mcpu=cortex-r5
+LDFLAGS := $(LDFLAGS) -mcpu=cortex-r5
+CDEFS := $(CDEFS) -D__TARGET_ARCH_ARM=7 -D__TARGET_PROFILE_R \
+			-DTOPPERS_CORTEX_R5 -DTARGET_RESET_ENTRY=start_r5
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(CHIPDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) chip_kernel_impl.o gic_kernel_impl.o ttc_hrt.o
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS) gic_support.o
+
+#
+#  スタートアップモジュールに関する定義
+#
+#  リセットエントリ（start_r5）を含むchip_support.oは，リンカスクリプ
+#  トのENTRYから参照されるため，START_OBJSに含めて常に直接リンクする．
+#
+START_OBJS := chip_support.o $(START_OBJS)
+
+#
+#  システムサービスに関する定義
+#
+SYSSVC_DIRS := $(SYSSVC_DIRS) $(CHIPDIR)
+
+#
+#  コア依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/common/Makefile.core

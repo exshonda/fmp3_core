@@ -1,0 +1,195 @@
+		TOPPERS/FMP3カーネル
+		ZynqMP RPU（Cortex-R5）チップ依存部 ユーザーズマニュアル
+
+		対応バージョン: Release 3.4.0
+		最終更新: 2026年06月20日
+
+このドキュメントは，TOPPERS/FMP3カーネルのZynqMP RPU（Cortex-R5）チップ
+依存部を使用するために必要な事項を説明するものである．
+
+----------------------------------------------------------------------
+ TOPPERS/FMP Kernel
+     Toyohashi Open Platform for Embedded Real-Time Systems/
+     Flexible MultiProcessor Kernel
+
+ Copyright (C) 2026 by Embedded and Real-Time Systems Laboratory
+             Graduate School of Information Science, Nagoya Univ., JAPAN
+
+ 上記著作権者は，以下の(1)〜(4)の条件を満たす場合に限り，本ソフトウェ
+ ア（本ソフトウェアを改変したものを含む．以下同じ）を使用・複製・改
+ 変・再配布（以下，利用と呼ぶ）することを無償で許諾する．
+ (1) 本ソフトウェアをソースコードの形で利用する場合には，上記の著作
+     権表示，この利用条件および下記の無保証規定が，そのままの形でソー
+     スコード中に含まれていること．
+ (2) 本ソフトウェアを，ライブラリ形式など，他のソフトウェア開発に使
+     用できる形で再配布する場合には，再配布に伴うドキュメント（利用
+     者マニュアルなど）に，上記の著作権表示，この利用条件および下記
+     の無保証規定を掲載すること．
+ (3) 本ソフトウェアを，機器に組み込むなど，他のソフトウェア開発に使
+     用できない形で再配布する場合には，次のいずれかの条件を満たすこ
+     と．
+   (a) 再配布に伴うドキュメント（利用者マニュアルなど）に，上記の著
+       作権表示，この利用条件および下記の無保証規定を掲載すること．
+   (b) 再配布の形態を，別に定める方法によって，TOPPERSプロジェクトに
+       報告すること．
+ (4) 本ソフトウェアの利用により直接的または間接的に生じるいかなる損
+     害からも，上記著作権者およびTOPPERSプロジェクトを免責すること．
+     また，本ソフトウェアのユーザまたはエンドユーザからのいかなる理
+     由に基づく請求からも，上記著作権者およびTOPPERSプロジェクトを
+     免責すること．
+
+ 本ソフトウェアは，無保証で提供されているものである．上記著作権者お
+ よびTOPPERSプロジェクトは，本ソフトウェアに関して，特定の使用目的
+ に対する適合性も含めて，いかなる保証も行わない．また，本ソフトウェ
+ アの利用により直接的または間接的に生じたいかなる損害に関しても，そ
+ の責任を負わない．
+
+ $Id$
+----------------------------------------------------------------------
+
+○目次
+
+１．ZynqMP RPUチップ依存部の概要
+２．ターゲット定義事項の規定
+３．ドライバ関連の情報
+４．制限事項
+５．リファレンス
+
+
+１．ZynqMP RPUチップ依存部の概要
+
+ZynqMP RPUチップ依存部（GNU開発環境向け）は，TOPPERS/FMP3カーネルを，
+Xilinx（AMD）社のZynq UltraScale+ MPSoCのRPU（Cortex-R5F）上で動作させる
+ためのチップ依存部である．シングルコア（lockstep相当，TNUM_PRCID=1）と，
+split mode による2コアSMP（TNUM_PRCID=2）の両構成をサポートする．2コア
+SMP構成は実機（zcu102_r5／kria_r5）で動作確認済みであり，QEMUでは後述の
+RPU用GICバンクマップ修正を施したビルドでのみ動作する．
+
+	チップ略称：zynqmp_r5
+	コア：Cortex-R5F（ARMv7-R，PMSAv7，VFPv3-D16）
+	コア依存部：ARMコア依存部（arch/arm_gcc/common）
+	割込みコントローラ：RPU用GIC（PL390/GICv1相当，
+						GICD=0xF9000000／GICC=0xF9001000）
+
+ARMコア依存部への変更は，core_support.Sのリセットベクタを
+TARGET_RESET_ENTRYマクロで差替え可能にするフックの1点のみである
+（lockstep初期化等のため，リセットエントリをチップ依存部のstart_r5に
+する．未定義時は従来どおりstartで，他ターゲットに影響しない）．
+
+start_r5（chip_support.S）は，lockstep用のレジスタ初期化と，SCTLR.Vの
+クリア（QEMUのR5Fはreset-hivecsで起動するため，例外ベクタを0番地に切り
+替える．実機ではもともとLOVECS起動であり冪等）を行ってからstartへ分岐
+する．
+
+MPU（PMSAv7）は，タスク間のメモリ保護には使用せず，(1)MPU無効時のデフォ
+ルトメモリマップによるXN制約の回避，(2)メモリ／デバイス属性の明示，のた
+めに静的リージョン（10個，全域アクセス可）を設定して使用している（ター
+ゲット依存部のhardware_init_hook）．
+
+
+２．ターゲット定義事項の規定
+
+	割込み優先度：-31（TMIN_INTPRI）〜 -1（TMAX_INTPRI）
+	割込み番号・割込みハンドラ番号：0〜186
+		0〜15: SGI，16〜31: PPI，32〜186: SPI
+	CPU例外ハンドラ番号：ARMコア依存部の規定に従う
+	クラス：CLS_PRC1／CLS_ALL_PRC1（TNUM_PRCID=1），
+		2コアSMP時はCLS_PRC2／CLS_ALL_PRC2も追加（TNUM_PRCID=2）
+
+
+３．ドライバ関連の情報
+
+3.1 高分解能タイマドライバ
+
+TTC3のカウンタ0を用いて実現している（ttc_hrt.c）．QEMUのTTCモデル
+（16ビットカウンタ・133MHz固定）と実機（32ビットカウンタ・100MHz）の両
+方で同一動作となるように，インターバルモード（周期400µs）＋マッチレジ
+スタ＋ソフトウェア基準時刻方式としている．駆動周波数はTTC_CLK_HZで切り
+替える（Makefile.targetのQEMU変数）．
+
+タイマのコンフィギュレーション（chip_timer.cfg）はFMP3の流儀に従い，
+CLASS(CLS_PRC1)で囲んだ記述である．HRT APIはプロセッサID付きの署名
+（target_hrt_set_event(ID prcid, HRTCNT)等）である．
+
+2コアSMP構成では，各プロセッサに専用のTTC3カウンタ（プロセッサインデッ
+クスprcidxにカウンタprcidx）を割り当てる．ただし時間基準（target_hrt_
+get_currentの戻り値）は全プロセッサで一貫させる必要があるため，呼び出し
+プロセッサに関わらずタイムマスタプロセッサのカウンタ0を共通の時間基準と
+して読み出すグローバル単調クロックとしている（専用スピンロックで排他し，
+カウンタ折返し直後の一時的な逆行は直前値でクランプ）．これにより，各カウ
+ンタが独立・未同期で，特に実機ではコアの起動時刻差により絶対値がずれてい
+ても，cross-PRCアラーム（msta_alm）の絶対時刻計算と発火判定が食い違わな
+い．グローバル時間基準の更新はタイムマスタのインターバル割込みに依存する
+ため，割込み禁止区間とカウンタ折返しが重なる確率を下げる目的で，実機（32
+ビットTTC）では周期を40秒と長く取っている（16ビットモデルのQEMUは400µs）．
+詳細はchip_design.mdを参照すること．
+
+3.2 シリアルインタフェースドライバ
+
+ZynqMPが内蔵するCadence UART（UART0/UART1）を，非TECSのシリアルドライ
+バ（chip_serial.c＋xuartps.c）でサポートしている（FMP3 3.4.0はtecsgen
+非同梱のため非TECS構成）．ボーレート等の設定（115200bps）はzynqmp_r5.h
+で定義している．
+
+QEMUのCadence UARTモデルはリセット時にTX/RXが無効のため，初期化時にCR
+レジスタへ0x14（TXEN|RXEN）を書き込んでいる（実機ではFSBLが設定する値
+の再設定であり無害）．
+
+
+４．制限事項
+
+	・QEMUでのsplit動作（2コアSMP）は，システム付属のQEMUでは動作しない．
+	  RPU1用のGIC CPUインタフェースが正しくバンクマップされないため，
+	  当該箇所を修正したアップストリームQEMUビルドが必要である（実機では
+	  本制約はなく，2コアSMPが動作する）
+	・メモリ保護なし（保護が必要な場合はHRP3版を使用すること）
+	・TCM（QEMUが未モデル）・OCM（XN制約）は使用しない
+
+
+５．リファレンス
+
+5.1 ファイル構成
+
+	arch/arm_gcc/zynqmp_r5/
+		Makefile.chip			Makefileのチップ依存部
+		chip_design.md			チップ依存部の設計メモ
+		chip_kernel.h			kernel.hのチップ依存部
+		chip_kernel.trb			コンフィギュレータのチップ依存部
+		chip_kernel_impl.c		カーネル実装のチップ依存部
+		chip_kernel_impl.h		カーネル実装のチップ依存部に関する定義
+		chip_rename.def			チップ依存部の内部識別名のリネーム定義
+		chip_rename.h			チップ依存部の内部識別名のリネーム
+		chip_serial.c			シリアルドライバのチップ依存部（非TECS）
+		chip_serial.cfg			同コンフィギュレーションファイル
+		chip_serial.h			同定義
+		chip_stddef.h			t_stddef.hのチップ依存部
+		chip_support.S			チップ依存部のアセンブリ言語部（start_r5）
+		chip_timer.cfg			タイマドライバのコンフィギュレーション
+		chip_timer.h			タイマドライバの定義
+		chip_unrename.h			チップ依存部の内部識別名のリネーム解除
+		chip_user.txt			本ファイル
+		ttc_hrt.c				高分解能タイマドライバ
+		xuartps.c				Cadence UART簡易SIOドライバの実装
+		xuartps.h				Cadence UARTのレジスタ定義
+		zynqmp_r5.h				チップのハードウェア資源の定義
+
+5.2 バージョン履歴
+
+2026/06/20
+	FMP3 3.4.0 対応（カーネル／ARMコア共通の3.4.0化．主な変更点は
+	doc/changelog/CHANGELOG_3.4.0.md を参照）．
+	・2コアSMP（split mode，TNUM_PRCID=2）対応を反映．per-PRC TTCと，
+	  cross-PRCアラーム対応のためのグローバル時間基準を3.ドライバ関連の
+	  情報に追記．実機（zcu102_r5／kria_r5）で2コアSMP動作確認済み．QEMU
+	  では RPU用GICバンクマップ修正を施したビルドで動作（4.制限事項）．
+	・chip_kernel_impl.h に mpu_set_region／mpu_disable_allregion の
+	  プロトタイプを追加し，gcc14 での implicit-declaration エラーを恒久
+	  修正（zcu102_r5／kria_r5 で共用するチップ層の修正）．
+
+2026/06/13
+	マニュアル新規作成（移植自体は2026/06/12のStep3で実施）．
+	QEMU（アップストリーム11.0.0，xlnx-zcu102）でsample1の動作確認済み
+	（実機は未確認．後続のASP3版・HRP3版はZCU102実機で確認済みであり，
+	JTAGロードフローは共通）
+
+以上

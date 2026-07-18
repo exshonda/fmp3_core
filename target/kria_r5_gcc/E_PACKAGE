@@ -1,0 +1,7 @@
+E_PACKAGE fmp3_kria_r5_gcc
+VERSION %date
+
+INCLUDE ../../MANIFEST
+INCLUDE ../../arch/arm_gcc/MANIFEST
+INCLUDE ../../arch/arm_gcc/zynqmp_r5/MANIFEST
+INCLUDE MANIFEST

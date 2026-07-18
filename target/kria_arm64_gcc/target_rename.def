@@ -1,0 +1,10 @@
+# target_kernel_impl.c
+target_el3_initialize
+target_el2_initialize
+target_mprc_initialize
+arm64_tnum_memory_area
+arm64_memory_area
+target_initialize
+target_exit
+
+INCLUDE "chip"

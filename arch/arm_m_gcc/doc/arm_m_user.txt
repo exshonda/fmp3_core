@@ -1,0 +1,372 @@
+=====================================================================
+                  Cortex-M（ARM-M）コア依存部マニュアル
+                                  Last Modified:2026 June 20
+=====================================================================
+
+○概要
+
+本ドキュメントは，TOPPERS/FMP3カーネルのCortex-M（ARMv8-M）コア依存部
+（arch/arm_m_gcc）について説明したものである．
+
+本コア依存部は，FMP3として初めてのCortex-M（ARMv8-M Mainline）アーキテ
+クチャ依存部であり，マルチプロセッサ（SMP）に対応している．母体は，
+fmp3_pico_sdk（FMP3のCortex-Mマルチコア実装）であり，これをFMP3 trunkの
+流儀（Rubyの.trbとMakefileによるビルド，configure.rbによるコンフィギュ
+レーション，pico-sdk非依存）へ移植したものである．
+
+Cortex-Mのプロセッサコア略称を"arm_m"とする．GNU開発環境向けのCortex-M
+コア依存部を置くディレクトリはarch/arm_m_gcc/commonとなる．
+
+本マニュアルでは，ARM-Mコア依存部の「共通部」（arch/arm_m_gcc/common）に
+ついて記述する．チップ・ボードに固有な事項（プロセッサ間割込みの実体，
+自コア番号の取得手段，二次コアの起動手順，メモリマップ等）は，各ターゲッ
+ト依存部に委ねており，本マニュアルでは概要と参照に留める．
+
+
+○対応プロセッサと構成
+
+●対応プロセッサ
+
+ARMには複数のアーキテクチャバージョンが存在するが，本コア依存部は，
+ARMv8-M Mainline（Cortex-M33等）を対象とする．Thumb命令で動作する．
+
+コードはマクロ __TARGET_ARCH_THUMB の値によりアーキテクチャを判定する．
+ARMv8-Mは __TARGET_ARCH_THUMB >= 4 として扱う．GNU開発環境では
+__TARGET_ARCH_THUMB が自動定義されないため，ターゲット依存部のMakefileで
+明示的に定義する必要がある（後述の「必須となる設定」を参照）．
+
+●使用するハードウェア機構
+
+  ・NVIC（Nested Vectored Interrupt Controller）による割込み管理
+  ・SysTick（コア内蔵タイマ）を高分解能タイマ（HRT）として使用
+  ・MSP（メインスタックポインタ）／PSP（プロセススタックポインタ）の
+    使い分けによるコンテキスト管理
+  ・PendSV例外によるディスパッチ
+  ・TrustZone（Secure単独動作）
+
+●FPU
+
+FPUの使用はターゲット依存とする．既定ではソフトウェア浮動小数点
+（soft-float）でビルドする．
+
+
+○必須となる設定
+
+ARMv8-M（Cortex-M33等）をSecureで単独動作させる構成では，ターゲット依存
+部で以下のマクロを定義する必要がある．
+
+●TOPPERS_ENABLE_TRUSTZONE
+
+TrustZoneを搭載するコア（Cortex-M33等）をSecure状態で単独動作させる場合
+に必須である．例外復帰時にLRに設定されるEXC_RETURNの値の整合に用いる．
+本マクロを定義しない場合，EXC_RETURNがNonSecure用の値（0xffffffbc）と
+なるが，Secure状態で動作するコアでは例外復帰の整合性チェック（exception
+return integrity check）に失敗する．本マクロを定義すると，EXC_RETURNが
+Secure用の値（0xfffffffd）に切り替わる（arm_m.hのEXC_RETURNの定義を参照）．
+
+●__TARGET_ARCH_THUMB
+
+ARMv8-Mを示す値（5）をターゲット依存部のMakefileで定義する．
+
+  -D__TARGET_ARCH_THUMB=5
+
+GNU開発環境ではこのマクロが自動定義されないため，明示が必要である．
+
+
+○開発環境
+
+コンパイラは，GNU C/C++（arm-none-eabi）を使用する．GCCのターゲット
+アーキテクチャの既定値は arm-none-eabi である（Makefile.coreで指定）．
+
+
+○カーネルの使用リソース
+
+プロセッサ毎にカーネルは以下のリソースを使用する．
+
+●SysTick（コア内蔵タイマ）
+
+カーネルの高分解能タイマ（HRT）として用いる．イベント駆動（ワンショッ
+ト）方式で，次のタイムイベント発生時刻までを設定する．
+
+●PendSV例外
+
+タスクディスパッチに用いる．ディスパッチ要求はICSRのPENDSVSETビットを
+セットすることで発行する．
+
+●プロセッサ間割込み（マルチプロセッサ構成時）
+
+ディスパッチ要求・カーネル終了要求・高分解能タイマ設定要求のために，
+プロセッサ間割込みを用いる．プロセッサ間割込みの実体（送出に用いるハー
+ドウェア機構）はチップ依存であり，各ターゲット依存部で実装する（後述）．
+
+
+○CPU例外の取り扱い
+
+●CPU例外ハンドラ番号
+
+CPU例外ハンドラ番号（excno）は，例外発生時にIPSR（およびEPSR）に設定さ
+れる例外番号とする（arm_m.h）．
+
+  EXCNO_NMI      2
+  EXCNO_HARD     3
+  EXCNO_MPU      4
+  EXCNO_BUS      5
+  EXCNO_USAGE    6
+  EXCNO_SECURE   7
+  EXCNO_SVCALL  11
+  EXCNO_DEBUG   12
+  EXCNO_PENDSV  14
+
+CPU例外ハンドラ番号の最小値（TMIN_EXCNO）は2，最大値（TMAX_EXCNO）は14
+である．
+
+●例外フレーム（CPU例外ハンドラへの引数）
+
+CPU例外ハンドラの引数には，CPU例外に関する情報を記憶している領域（例外
+フレーム）の先頭番地が渡される．例外フレーム中の主な情報のオフセットは
+次の通りである（arm_m.h）．
+
+  P_EXCINF_OFFSET_BASEPRI     0
+  P_EXCINF_OFFSET_EXC_RETURN  1
+  P_EXCINF_OFFSET_PC          8
+  P_EXCINF_OFFSET_XPSR        9
+
+exc_sense_intmaskは，例外フレーム中のBASEPRI・PRIMASK・EXC_RETURNを参照
+して，CPU例外発生時のシステム状態（カーネル実行中でないこと，CPUロック
+状態でないこと，割込み優先度マスク全解除であること，タスクコンテキスト
+であること等）を判定する．
+
+
+○割込みの取り扱い
+
+割込みはNVICを用いて扱う．
+
+●割込みハンドラ番号と割込み番号
+
+割込みハンドラ番号（inhno）と割込み番号（intno）は，割込み発生時にIPSR
+（EPSR）に設定される例外番号とする（core_kernel_impl.h）．SysTickの割込
+み番号（IRQNO_SYSTICK）は15である．割込み番号の最小値（TMIN_INTNO）は
+15である．
+
+マルチプロセッサ構成では，割込み番号・割込みハンドラ番号の上位16ビット
+にプロセッサIDを符号化する（(prcid << 16) | 番号）．
+
+●CPUロックフラグと割込み優先度マスク
+
+CPUロックフラグおよび割込み優先度マスクには，BASEPRIを用いる．全割込み
+を禁止する機能としてPRIMASK・FAULTMASKがあるが，カーネル管理外の割込み
+をサポートするため，これらはCPUロックには用いない．CPUロック状態の管理
+は，PCB内の変数（lock_flag）とBASEPRIの保存値（saved_iipm）により行う
+（core_kernel_impl.h，core_pcb.h）．
+
+CPUロック状態では，BASEPRIを，カーネル管理外のものを除くすべての割込み
+要求をマスクする値（TIPM_LOCK）と，モデル上の割込み優先度マスクとの高い
+方に設定する．
+
+●dis_int/ena_int のサポート
+
+割込み要求禁止フラグの操作（disable_int/enable_int）をNVICのSet/Clear
+Enableレジスタ（SysTickはSysTick制御レジスタ）に対して行う．
+
+
+○ディスパッチャ
+
+ディスパッチャはPendSV例外で実現する（core_support.S）．コンテキストの
+切り替えはMSP（非タスクコンテキスト用）とPSP（タスクコンテキスト用）の
+使い分けで行う．コンテキストの判定（sense_context）は，CONTROLレジスタ
+のSPSEL（PSP使用）ビットにより，PSPが有効ならタスクコンテキスト，MSPが
+有効なら非タスクコンテキストと判断する．
+
+
+○マルチプロセッサ（SMP）対応
+
+ARM-Mコア依存部はマルチプロセッサに対応している．プロセッサ数（TNUM_PRCID）
+が1のときは単一プロセッサとして扱い，マルチプロセッサ機構はユニプロセッ
+サ用のダミーで構成する．
+
+マルチプロセッサに関わる以下の機能は，アーキ共通のインタフェースとして
+ARM-Mコア依存部が規定し，その実体はチップ依存部（各ターゲット依存部）で
+実装する．
+
+  ・自コア番号の取得（get_my_prcidx）
+  ・ジャイアントロック（acquire_glock/try_glock/release_glock）および
+    ネイティブスピンロック
+  ・プロセッサ間割込みの発行
+    （request_dispatch_prc/request_ext_ker/request_set_hrt_event）
+  ・二次コアの起動（target_mprc_initialize）
+
+詳細は「ターゲット依存部開発者向けの情報」および各ターゲット依存部の
+ドキュメントを参照すること．
+
+
+○対応ターゲット
+
+ARM-Mコア依存部に対応するターゲットは次の通りである．各ターゲットに固有
+な事項は，各ターゲット依存部のドキュメント（target_user.txt等）を参照す
+ること．
+
+●musca_b1_gcc
+
+QEMUの musca-b1（ARM Musca-B1，SSE-200ベースの対称デュアルCortex-M33）を
+対象とするターゲット．QEMU上でのマルチプロセッサ（2コアSMP）動作確認用．
+
+●rp2350_pico2_gcc
+
+Raspberry Pi Pico2（RP2350，デュアルCortex-M33）を対象とする実機ターゲット．
+
+
+○ビルド
+
+configure.rb に -T オプションでターゲットを指定してビルドする．例：
+
+  configure.rb -T musca_b1_gcc
+  configure.rb -T rp2350_pico2_gcc
+
+プロセッサ数は make 変数 PRC_NUM で指定する（マルチプロセッサ構成では
+PRC_NUM=2 等）．
+
+
+=====================================================================
+                ターゲット依存部開発者向けの情報
+=====================================================================
+
+○ディレクトリ・ファイル構成
+
+  arch/arm_m_gcc/common/
+      Makefile.core         Makefileのコア依存部
+      arm_m.h               コアのハードウェア資源の定義
+      core_insn.h           コア独自の命令の実行
+      core_asm.inc          アセンブラ記述のためのマクロ
+      core_cfg1_out.h       cfg1_out.cのリンクに必要なスタブの定義
+      core_check.trb        kernel_check.trbのコア依存部
+      core_kernel.h         kernel.hのコア依存部
+      core_kernel.trb       kernel.trbのコア依存部
+      core_kernel_impl.c    カーネル実装のコア依存部関連の定義
+      core_kernel_impl.h    カーネル実装のコア依存部
+      core_offset.trb       genoffset.trbのコア依存部
+      core_pcb.h            pcb.hのコア依存部
+      core_rename.def       コア依存部の内部識別名のリネーム定義
+      core_rename.h         コア依存部の内部識別名のリネーム
+      core_sil.h            sil.hのコア依存部
+      core_stddef.h         t_stddef.hのコア依存部
+      core_support.S        カーネル実装のコア依存部（アセンブリ言語）
+      core_sym.def          kernel_sym.defのコア依存部
+      core_test.h           テストプログラムのコア依存定義
+      core_unrename.h       コア依存部の内部識別名のリネーム解除
+      start.S               カーネル用のスタートアップモジュール
+
+  arch/arm_m_gcc/doc/
+      arm_m_user.txt        ARM-Mコア依存部 ユーザーズマニュアル（本ファイル）
+      arm_m_design.md       ARM-Mコア依存部 設計メモ
+
+
+○マスタプロセッサ・コンテキストの判定
+
+カーネルは，割込み・例外の入口でネストカウント用の変数をカウントアップ
+し，出口でカウントダウンする．ARM-Mでは，CONTROLレジスタのSPSEL（PSP/
+MSP）によってもコンテキストを判定できる（sense_context）．
+
+
+○自コア番号の取得（get_my_prcidx）
+
+自コア番号（0オリジンのインデックス）の取得関数 get_my_prcidx() は，
+アーキ共通のインタフェースであり，その実体はチップ依存部で定義する．
+TNUM_PRCID == 1 のときは常に0を返す．
+
+Cortex-M（M-profile）には，自コア番号を直接読めるレジスタ（A-profileの
+MPIDR相当）がないため，取得手段はチップに依存する．たとえば，RP2350では
+SIOのCPUIDレジスタで直接読み出すが，SSE-200（Musca-B1）にはそのような
+レジスタがないため，現在のMSP（メインスタックポインタ）が，どのコアの
+割込みスタック（istack）の範囲に入っているかで判定する（後者は，起動時
+のブートハンドシェイクで各コアが自分用のistackを設定済みであることを
+前提とする）．
+
+
+○ロック（ジャイアントロック／ネイティブスピンロック）
+
+ジャイアントロックおよびネイティブスピンロックの操作（initialize/acquire/
+try/release/refer）は，アーキ共通のインタフェースとして規定し，実体は
+チップ依存部で実装する．
+
+try系の関数（try_glock，try_lock等）の返り値の意味は trunk 共通の契約に
+従い，「既に取得されていた（＝取得失敗）」が true，「取得に成功した」が
+false である．この契約を誤ると while (try_glock()) 等で無限ループに陥る
+ため注意すること．
+
+ロックの実体はチップにより異なる．たとえば，RP2350ではSIOのハードウェア
+スピンロックを用い，SSE-200（Musca-B1）にはハードウェアスピンロックが
+ないため，LDREX/STREXによるソフトウェアスピンロックを用いる．
+
+
+○プロセッサ間割込み（IPI）
+
+マルチプロセッサ構成では，以下のプロセッサ間割込みの発行関数をチップ依存
+部で実装する．
+
+  request_dispatch_prc(prcid)   ディスパッチ要求
+  request_ext_ker(prcid)        カーネル終了要求
+  request_set_hrt_event(prcid)  高分解能タイマ設定要求
+
+これらの送出に用いるハードウェア機構はチップ依存である（たとえば，SSE-200
+ではMHU，RP2350ではSIO FIFO）．具体的な番地・割込み番号は各ターゲット依
+存部に閉じ込める．
+
+
+○二次コアの起動
+
+start.S のスタートアップ処理では，マスタコアでない場合は sta_ker() へ分岐
+する．マスタコアは初期化後 target_mprc_initialize() を呼び出し（0でない場
+合），この中で二次コアの起動等を行う．二次コアの起動手順はチップに依存す
+る．
+
+スタートアップ初期化（スタック設定前）では，自コア番号の取得手段が未確立
+の場合があるため，起動時専用のアセンブラマクロ my_prcidx_boot を用いる．
+CPUID等で常に自コア番号が分かるチップでは，my_prcidx_boot は my_prcidx に
+委譲される（core_asm.incのデフォルト）．チップ側で起動時専用の取得方法を
+用いる場合は，MY_PRCIDX_BOOT_DEFINED を定義した上で my_prcidx_boot マクロ
+を独自に定義する．
+
+
+○ベクタテーブルとハンドラテーブルの生成
+
+ベクタテーブル（_kernel_vector_table），例外/割込みハンドラテーブル
+（_kernel_exc_tbl），割込み属性ビットパターン（_kernel_bitpat_cfgint）の
+生成は，割込み番号の有効範囲に依存するため，ターゲット依存部の生成スクリ
+プト（target_kernel.trb）で行う（core_kernel.trbの冒頭コメントを参照）．
+ARM-Mコア依存部の core_kernel.trb は，カーネル共通テンプレートのインクル
+ードと補助関数の定義のみを行う．
+
+なお，ARMv8-MのVTOR（ベクタテーブルオフセットレジスタ）の制約により，
+プロセッサ毎のベクタテーブルは適切な境界に整列させる必要がある（詳細は
+設計メモを参照）．
+
+
+○Makefileでの定義事項（offset.h の依存関係）
+
+ARM-Mコア依存部では，core_kernel_impl.h が（CFG1_OUT以外で）offset.h を
+取り込む（core_kernel_impl.h）．この取り込みは kernel_impl.h →
+target_kernel_impl.h → chip_kernel_impl.h → core_kernel_impl.h の連鎖で，
+カーネル・システムサービス・アプリのほぼ全Cオブジェクトに波及する．
+
+他アーキ（arm64/riscv）では offset.h をアセンブラからのみ取り込むため，
+上位Makefileの ASMOBJS 用 offset.timestamp の順序依存だけで足りるが，
+ARM-Mでは並列ビルド（make -j）時に offset.h 生成前にCオブジェクトを
+コンパイルしてしまうレース不具合が起こりうる．これを避けるため，
+Makefile.core で OFFSET_COBJS を定義し（遅延展開のため = を使用），上位
+Makefile（sample/Makefile）がこれらに offset.timestamp への順序専用依存
+を付与する．OFFSET_COBJS は非ARM-Mターゲットでは空であり，影響しない．
+
+
+=====================================================================
+                             変更履歴
+=====================================================================
+2026/06/20
+・ARM-Mコア依存部のユーザーズマニュアル（本ファイル）を新規作成．
+
+2026/06
+・FMP3初のCortex-M（ARMv8-M Mainline）コア依存部 arch/arm_m_gcc を新規追加．
+  fmp3_pico_sdk を母体に，FMP3 trunk の流儀（.trb/Makefile，pico-sdk非依存）
+  へ移植．マルチプロセッサ（SMP）対応．対応ターゲット：musca_b1_gcc（QEMU），
+  rp2350_pico2_gcc（実機 Raspberry Pi Pico2）．
+
+以上．

@@ -1,0 +1,173 @@
+=====================================================================
+          Arm Musca-B1（SSE-200 / dual Cortex-M33）ターゲット依存部
+                            2026 (C) Shinya Honda honda@ertl.jp
+                                  Last Modified:2026 Jun 20 00:00:00
+=====================================================================
+
+○概要
+
+musca_b1_gcc 依存部は，Arm の評価用 SoC「Musca-B1」を QEMU でエミュレー
+トした仮想ボード（QEMU の "musca-b1" マシン）をサポートしている．Musca-B1
+は Arm SSE-200 サブシステムを中核とし，FPU/DSP を搭載した対称デュアル
+Cortex-M33（ARMv8-M Mainline，TrustZone 搭載）を持つ．本依存部は，この 2 コ
+ア構成を用いて FMP3 の 2 コア SMP（対称マルチプロセッシング）を QEMU 上で検証
+するためのターゲットである．実機ではなく，QEMU 上での動作確認専用である．
+
+サポートしているプロセッサ数は 1 個または 2 個であり，ディフォルトでは 1 個
+（単一プロセッサ）で動作する．make 引数 PRC_NUM=2 を指定すると 2 コア SMP で
+動作する．
+
+対応バージョンは FMP3 Release 3.4.0 である．
+
+アーキテクチャ（Cortex-M / ARMv8-M）に共通な事項は，本ドキュメントでは扱わ
+ない．ベクタテーブル，例外／割込みエントリ，ディスパッチャ（PendSV），CPU
+ロック方式（BASEPRI），SysTick／NVIC の扱い，TrustZone・セキュア単独動作な
+ど Cortex-M 共通の設計は，次を参照のこと．
+
+  arch/arm_m_gcc/doc/    （Cortex-M アーキテクチャ依存部のドキュメント）
+
+
+●ボード（QEMU 仮想マシン）
+
+動作確認は QEMU の "musca-b1" マシンで行った．本依存部のアドレス・割込み番
+号は，QEMU のソース（hw/arm/musca.c，hw/arm/armsse.c，hw/misc/armsse-mhu.c）
+に基づいて確定している．
+
+  ・マシン名      : musca-b1
+  ・SoC           : Arm Musca-B1（SSE-200 サブシステム）
+  ・プロセッサ    : Cortex-M33 × 2（両コア FPU/DSP 搭載＝対称）
+  ・プロセッサクロック : 40MHz（musca.c の SYSCLK_FRQ = 40000000）
+  ・コンソール    : Arm PrimeCell PL011 UART0（0x40105000，115200bps）
+
+実機の Musca-B1 ボードでの動作確認は行っていない（QEMU 専用）．
+
+
+●QEMU
+
+動作確認を行った QEMU は次の通りである．Musca-B1 の MHU（プロセッサ間割込み
+に使用）と SSE-200 のセカンダリコア起動（CPUWAIT）が正しく実装されたバージョ
+ンが必要である．
+
+   qemu-system-arm（QEMU 11.0.1 系で動作確認）
+
+MHU を含む SSE-200 の周辺は QEMU の比較的新しいバージョンで完備されているた
+め，2 コア SMP を検証する場合は新しめの QEMU を用いること（古い QEMU では
+MHU が未実装で，クロスコア IPI が機能しないことがある）．
+
+
+●コンパイラ
+
+動作確認を行った Arm から公開されている GCC である．
+
+   arm-none-eabi-gcc
+   （ARMv8-M Mainline．-mcpu=cortex-m33 -mthumb -mfloat-abi=soft）
+
+Musca-B1 の Cortex-M33 は FPU/DSP を搭載するが，本依存部はソフトウェア浮動小
+数点 ABI（soft-float）でビルドする．
+
+
+●実行環境
+
+QEMU 上で次のコマンドにより実行する．Musca-B1 はボード構成として 2 コアが固
+定されているため，QEMU の -smp オプションは不要である（単一の -kernel を両コ
+アが参照する）．
+
+  qemu-system-arm -machine musca-b1 -cpu cortex-m33 \
+      -kernel <ELFファイル> -nographic \
+      -semihosting-config enable=on,target=native
+
+  ・-semihosting-config enable=on … カーネルの終了（target_exit）を ARM セミ
+    ホスティング（SYS_EXIT）で行うため必須．Makefile.target が
+    -DTOPPERS_USE_QEMU を定義しており，これにより終了処理がセミホスティング
+    呼出しになる（QEMU が exit 0 で停止する）．
+  ・-nographic … コンソール（PL011 UART0）を標準入出力に接続する．
+
+Makefile.target には実行用ターゲット run（make run）が定義されている．
+
+
+●デバッグ環境
+
+QEMU の GDB スタブを用いる．Makefile.target に次が定義されている．
+
+  ・make qemug … -S -gdb tcp::1234 付きで QEMU を起動（実行を停止して待機）
+  ・make db    … arm-none-eabi-gdb で接続（target/musca_b1_gcc/gdb.ini を使用）
+
+2 コアでデバッグする場合は，QEMU の GDB スタブが両コアをスレッドとして提示す
+るため，gdb 側でスレッドを切替えて各コアを観測する．
+
+
+○システム構築手順
+
+Musca-B1 用の FMP3 カーネルを構築する手順は，「TOPPERS/FMP3 カーネル ユーザー
+ズマニュアル」の「クイックスタートガイド」の章に記述されている通りである．
+
+シリアルドライバを使用する際には，以下のオプションでシリアルドライバと各種
+システムサービスをビルド対象とする（単一プロセッサ＝既定）．
+
+  configure.rb -T musca_b1_gcc -w \
+      -S "syslog.o banner.o serial.o serial_cfg.o logtask.o"
+
+2 コア SMP でビルドする場合は，make にプロセッサ数を渡す．
+
+  make PRC_NUM=2
+
+PRC_NUM は configure.rb ではなく make に渡す（PRC_NUM=2 を付けると TNUM_PRCID
+が 2 になり，プロセッサ間割込み（target_ipi.*）・ソフトウェアスピンロック・
+セカンダリコア起動が有効化される）．
+
+
+○カーネルの使用リソース
+
+・タイマ（高分解能タイマ HRT）
+  各コア内蔵の SysTick（24bit ダウンカウンタ，プロセッサクロック 40MHz 駆動）
+  を，次のタイムイベントまでの相対時間でワンショット駆動するイベント駆動 HRT
+  として使用する（target_timer.c）．カウント値の進み幅（TSTEP_HRTCNT）は 1us
+  である．
+
+・UART（コンソール）
+  Arm PrimeCell PL011 UART0（0x40105000）をポーリングおよび割込みで使用する
+  （pl011_uart.c）．低レベル出力（バナー等）はポーリング出力である．
+   ボーレート : 115200bps
+   割込み     : combined 割込み（uart0 の SSE 入力 IRQ12，例外番号 28）
+
+・プロセッサ間割込み（PRC_NUM=2 のときのみ）
+  SSE-200 内蔵の MHU0（Message Handling Unit，0x40003000）を用いる．各コア宛
+  ての MHU0 割込み（NVIC IRQ6＝例外番号 22）を，ディスパッチ要求・カーネル終
+  了要求・高分解能タイマ設定要求の 3 種別に共用する（MHU 割込みレジスタ下位
+  3bit を種別に割当て）．詳細は target_design.md を参照．
+
+・メモリ
+  QEMU musca-b1 のメモリマップ（musca.ld 参照）に基づく．
+   FLASH（コード，QSPI フラッシュのエイリアス）: 0x10000000〜
+   RAM  （SSE-200 内蔵 SRAM，512KB）           : 0x20000000〜
+  CPU はリセット時に init_svtor（=0x10000000）からベクタテーブルを読むため，
+  ベクタテーブルを FLASH 先頭に配置する．
+
+
+○制限事項・注意
+
+・本ターゲットは QEMU 上での動作確認専用であり，実機 Musca-B1 ボードでの検証
+  は行っていない．
+
+・サポートするプロセッサ数は 1 または 2 である（TNUM_PRCID が範囲外のときは
+  ビルドエラーとなる）．
+
+・Cortex-M33（M-profile）には自コア番号を読むレジスタ（MPIDR 相当）が無いた
+  め，2 コア時の自コア番号は，起動ハンドシェイク（ブートフラグ）と割込みスタッ
+  ク（istack）の範囲判定で導出している（chip_kernel_impl.c）．詳細は
+  target_design.md を参照．
+
+・TrustZone 搭載コアをセキュア状態で単独動作させるため，Makefile.chip で
+  -DTOPPERS_ENABLE_TRUSTZONE を定義している（これが無いと，セキュア状態から
+  の例外リターン整合性チェックに失敗する）．
+
+
+○変更履歴
+
+2026/06/20
+・最初のリリース．QEMU musca-b1（SSE-200 / 対称デュアル Cortex-M33）を対象に
+  新規作成．単一プロセッサ（PRC_NUM=1）および 2 コア SMP（PRC_NUM=2）を QEMU
+  上で検証した（task1／mtskman1／mtskman2／mmutex1 PASS）．Cortex-M アーキテク
+  チャ依存部 arch/arm_m_gcc と組で用いる．
+
+以上．

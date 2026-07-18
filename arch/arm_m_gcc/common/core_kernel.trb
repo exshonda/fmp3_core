@@ -1,0 +1,66 @@
+# -*- coding: utf-8 -*-
+#
+#		パス2の生成スクリプトのコア依存部（ARM-M用）
+#
+#  ARM-M では，ベクタテーブル（_kernel_vector_table）・例外/割込みハンドラ
+#  テーブル（_kernel_exc_tbl）・割込み属性ビットパターン（_kernel_bitpat_cfgint）
+#  の生成は，割込み番号の有効範囲（INHNO_VALID/INTNO_VALID/EXCNO_VALID）に
+#  依存するため，ターゲット依存部（target_kernel.trb）で行う．本ファイルでは，
+#  カーネル共通テンプレートのインクルードと，補助関数の定義のみを行う．
+#
+
+#
+#  配置するセクションを指定した変数定義の生成
+#
+def DefineVariableSection(genFile, defvar, secname)
+  if secname != ""
+    genFile.add("#{defvar} __attribute__((section(\"#{secname}\"),nocommon));")
+  else
+    genFile.add("#{defvar};")
+  end
+end
+
+#
+#  カーネルのデータ領域のセクション名
+#
+def SecnameKernelData(cls)
+  return("")
+end
+
+#
+#  スタック領域のセクション名
+#
+def SecnameStack(cls)
+  return("")
+end
+
+#
+#  ネイティブスピンロックの生成
+#
+def GenerateNativeSpn(params)
+  $kernelCfgC.add("LOCK _kernel_lock_#{params[:spnid]};")
+  return("((intptr_t) &_kernel_lock_#{params[:spnid]})")
+end
+
+#
+#  TSKINICTXBの初期化情報を生成
+#
+def GenerateTskinictxb(key, params)
+  return("{" \
+         "\t(void *)(#{params[:tinib_stk]}), " \
+         "\t((void *)((char *)(#{params[:tinib_stk]}) + " \
+         "(#{params[:tinib_stksz]}))), " \
+         "}")
+end
+
+#
+#  ベクタテーブルの予約領域はデフォルトで0にする
+#
+def GenResVectVal(num)
+  return(0)
+end
+
+#
+#  ターゲット非依存部のインクルード
+#
+IncludeTrb("kernel/kernel.trb")

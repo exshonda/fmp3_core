@@ -1,0 +1,53 @@
+#
+#		Makefileのターゲット依存部（RP2350 / RaspberryPi Pico 2 用）
+#
+
+#
+#  システム名，チップ名，コア名，開発環境名の定義
+#
+SYS = rp2350_pico2
+CHIP = rp2350
+CORE = arm_m
+TOOL = gcc
+
+#
+#  TECS を使用しない（非TECS版 SIO ドライバを用いる）
+#
+OMIT_TECS = true
+ifdef OMIT_TECS
+	CDEFS := $(CDEFS) -DTOPPERS_OMIT_TECS
+endif
+
+#
+#  コンパイルオプション
+#
+INCLUDES := $(INCLUDES) -I$(TARGETDIR)
+COPTS := $(COPTS) -mlittle-endian
+LDFLAGS := $(LDFLAGS) -mlittle-endian
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(TARGETDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) target_kernel_impl.o target_timer.o
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS) image_def.o
+
+#
+#  リンカスクリプトの定義
+#
+LDSCRIPT = $(TARGETDIR)/rp2350_pico2.ld
+
+#
+#  チップ依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)/Makefile.chip
+
+#
+#  OpenOCD による書込み（Phase D2 で使用．D1 ではビルドのみ）
+#
+#  RaspberryPi フォークの OpenOCD + Debugprobe(CMSIS-DAP) を用いる．
+#    openocd -f interface/cmsis-dap.cfg -f target/rp2350.cfg \
+#            -c "adapter speed 5000" -c "program fmp verify reset exit"
+#
+run:
+	@echo "Phase D1 はビルドのみ．書込み・実行は D2 で行う．"

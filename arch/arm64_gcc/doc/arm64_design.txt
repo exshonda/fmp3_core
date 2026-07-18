@@ -1,0 +1,519 @@
+=====================================================================
+                       ARM64コア依存部 設計メモ
+                                  Last Modified:2020 Apr 30 15:54:46
+=====================================================================
+
+○本ドキュメントについて
+
+本ドキュメントはARM64コア依存部の設計メモである．現状はARM64の仕様，
+GICの仕様も含むが将来的には分離する予定である．
+
+ARM64の仕様は膨大であるため，カーネルの実装に関連する事項についてのみ
+記載する．
+
+[1] ARM Generic Interrupt Controller - Architecture version 2.0
+Architecture Specification, ARM IHI 0048B (ID061411)
+
+[2] ARM Generic Interrupt Controller Architecture Specification - GIC 
+architecture version 3.0 and version 4.0, ARM IHI 0069C (ID070116)
+
+[3] ARM Architecture Reference Manual - ARMv8, for ARMv8-A architecture 
+profile, ARM DDI 0487D.a (ID103018)
+
+
+○割込み関連の設計
+
+●割込みに関するATFの仕様（SW）
+
+BL32(FMP)を実行する際には，SCR_EL3.FIQを0，SCR_EL3.IRQを0，例外レベル
+をEL1とする．そのため，各割込み発生時の受け付け例外レベルは次のように
+なる．
+
+・IRQ : S-EL1
+・FIQ : S-EL1
+
+Non-Secureカーネルを実行する際には，SCR_EL3.FIQを1，SCR_EL3.IRQを0，例
+外レベルをEL1とする．そのため，各割込み発生時の受け付け例外レベルは次
+のように
+
+・IRQ : NS-EL1
+・FIQ : S-EL1
+
+
+●S/NSにおける優先度の扱い（HW）
+
+【GICv3/4】SCR_EL3.FIQが1であるため，各レジスタへのNSからのアクセスは
+次のようになる．
+
+ICC_PMR_EL1/ICC_RPR_EL1
+・内容が0x00-0x7F
+  ・0x00が読み込め，ICC_PMR_EL1へ書き込み出来ない
+・0x80-0xFF
+  ・優先度のNS読み書き時のルールが適用される
+  
+GICx_IPRIORITYR<n>:
+  ・優先度のNS読み書き時のルールが適用される
+  
+【GICv2】SCR_EL3.FIQの設定値に関わらず，上記のルールが適用される．
+
+        
+●【GICv3/4】【GICv2】NS読み書き時のルール（HW）
+
+NSG1の割込みに対して適用される．
+
+NSで優先度を読み込むと実際の優先度を1ビット左シフトした値が読み込める．
+
+NSで優先度を書き込むと優先度を1ビット右シフトして上位ビットに'1'を設定
+した値が書き込まれる．
+
+これより，NSが扱う優先度は，物理的な優先度の下半分にマッピングされる．
+詳細は文献[1]Figure 3-7及び文献[2]Figure 4-9を参照のこと．
+
+例)8bitの場合
+ NS視点の優先度範囲 0x00～0xFE
+ 物理的な優先度範囲 0x80～0xFF
+
+
+●【GICv3/4】【GICv2】割込みグループ（HW）
+
+【GICv2】
+
+グループ0(G0INT)とグループ1(G1INT)に設定可能．
+
+G0INT
+・IRQとするかFIQとするか設定可能．
+・上半分の高い優先度を設定することを推奨
+
+G1INT
+・常にIRQ割込みとなる．
+・下半分の低い優先度を設定することを推奨
+
+【GICv3/4】
+
+グループ0(G0INT)とSグループ1(SG1INT)とNSグループ1(NSG1INT)に設定可能．
+
+G0INT
+・EL3で使用することを推奨
+
+SG1INT
+・S-EL1で使用することを推奨
+
+NSG1INT
+・NS-EL1で使用することを推奨
+
+発生時に生成する割込みは次の通り
+
+実行状態	G0INT	SG1INT	NSG1INT
+S-EL1		FIQ		IRQ		FIQ
+NS-EL1		FIQ		FIQ		IRQ
+NS-EL2		FIQ		FIQ		IRQ
+EL3			FIQ		FIQ		FIQ
+
+
+●割込みマスクについて(HW)
+
+文献[3] Table D1-15 Physical interrupt target and masking when both 
+EL3 and EL2 are implemented より，以下の設定時のIRQ/FIQのマスクは次に
+ように扱われる．
+
+S側
+設定
+ SCR.FIQ == 0 : FIQをEL1で受ける
+ SCR.IRQ == 0 : IRQをEL1で受ける
+振る舞い
+ FIQフラグ : FIQを禁止可能
+ IRQフラグ : IRQを禁止可能
+ 
+N側 
+ SCR.FIQ == 1 : FIQをEL3で受ける
+ SCR.IRQ == 0 : IRQをEL1で受ける
+振る舞い
+ FIQフラグ : FIQを禁止出来ない
+ IRQフラグ : IRQを禁止可能 
+ LM-IH700BN-CR621
+ 
+ 
+●F/Iフラグについて(HW)
+
+ARMv8-Aでは，FフラグとIフラグは同一のステータスレジスタ中で保持される
+ではなく，独立したフラグとして扱われる．
+
+F/Iフラグにアクセスする方法は次の二種類がある．ビットの定義が異なるた
+め注意が必要である．
+
+・他のフラグ共に読み込み書き込み．
+ - 読み込み : mrs \reg daif
+ - 書き込み : msr daif \reg
+ ・ビット定義
+     FIQ : 0x040
+     IRQ : 0x080
+          
+・個別セット・クリア
+ - セット : msr DAIFSet, #imm
+ - クリア : msr DAIFClr, #imm
+ ・imm の値
+    FIQ : 0x001
+    IRQ : 0x002
+ 
+●OSでの扱い
+
+ARMの設計意図からFMP3では次のように割込みHWを使用する．
+
+【GICv2】
+
+                         TrustZoneなし   TrustZoneあり(S)  TrustZoneあり(NS)
+CPUロック                I               F                 I
+割込みロック             I/F             I/F               I/F
+割込み優先度マスク       0x00～0xFF      0x00～0x7F        0x00～0xFE(ハードでbit[7]=0)
+タスク実行時の
+割込み優先度マスク       0xFF            0x80              0xFE
+割込みグループ           G1INT           G0INT             G1INT
+
+【GICv3/4】
+
+[GICv3修正案]
+                         TrustZoneなし   TrustZoneあり(S)  TrustZoneあり(NS)
+CPUロック                I               I                 I
+割込みロック             I/F             I/F               I/F
+割込み優先度マスク       0x00～0xFF      0x00～0x7F        0x00～0xFE(ハードでbit[7]=0)
+タスク実行時の
+割込み優先度マスク       0xFF            0x80              0xFE
+割込みグループ           SG1INT          SG1INT            NSG1INT
+
+TrustZoneあり(S)の場合，別案として タスク実行時の割込み優先度マスクを
+0xFFとし，【GICv2】では常にIフラグをセットし，【GICv3/4】ではFフラグを
+マスクする方法がある．こちらの方法は上記の手法と比較して次のデメリット
+がある．
+
+・I/Fフラグの設定を誤るとNon-Secure側の割込みが受け付けられる．
+  OS実行中はI/Fフラグの変更は頻繁に行うためバグの原因となる．一方，PMR
+  は，割込みの出入り口処理，及び割込み優先度マスク変更APIでのみ操作す
+  るため，対応箇所が少なくて済む．
+  
+・条件フラグが減らせる
+  【GICv3/4】ではTrustZoneなしと比較して，I/Fフラグの扱いに変更がない．
+  【GICv1】でも常にセットしないといけないフラグがない．
+    
+・G1INTを使用出来ない【GICv3】
+  将来的にカーネル管理外割込みを使用したい場合に，G1INTを使用すること
+  が出来ない．
+
+●F/Iフラグの変更箇所
+
+F/Iフラグの変更のためのマクロの定義を検討するため，I/Fフラグの変更箇所
+についてまとめる．
+
+core_kernel_impl.h
+loc_cpu() : CPUロック状態への遷移
+・F/Iフラグのいずれかをクリア(i)
+unl_cpu() : CPUロック状態の解除
+・F/Iフラグのいずれかをセット(i)
+sense_lock() : CPUロック状態の参照
+・CPUロック状態でのF/Iフラグの状態のチェック[mrs \reg daif](a)
+exc_sense_lock() : CPUロック状態または割込みロック状態かの参照
+・CPUロックまたは割込み状態でのF/Iフラグの状態マクロ[mrs \reg daif](b)
+
+core_support.S
+・start_dispatch : 全割込み禁止状態からCPUロック状態へ遷移DAフラグもクリアしたい(c)
+・dispatcher_2   : CPUロック状態からCPUロック解除状態へ[msr DAIFClr](d)
+・call_exit_kernel : 割込みロック状態に変更(e)
+・start_r          : CPUロック状態からCPUロック解除状態へ[msr DAIFClr, ](d)
+・cur_spx_irq_handler : 
+・全割込み禁止状態からCPUロック状態へDAフラグもクリアしたい(c)
+・CPUロック状態からCPUロック解除状態へ(d)
+・CPUロック状態へ(f)
+exc_handler_1
+・CPUロック状態または割込みロック状態かのチェック[mrs \reg daif](j)
+・全割込み禁止状態からCPUロック解除状態へDAフラグもクリアしたい(g)
+・CPUロック状態へ(f)
+・システム状態をCPU例外発生時に(h)
+
+core_sil.h
+TOPPERS_disint() 全ての割込みの禁止
+・F/Iフラグをセットする
+・マクロは使用しない
+TOPPERS_set_fiq_irq() FIQとIRQの禁止ビットの復帰
+・F/Iフラグをロック前とする
+・マクロは使用しない
+
+arm64_insh.h
+current_daif() ステータスレジスタ（DAIF）の現在値の読出し
+・マクロは使用しない
+set_daif()     ステータスレジスタ（DAIF）の現在値の変更
+・マクロは使用しない
+disable_irq()  IRQの禁止
+・マクロは使用しない
+enable_irq()   IRQの許可
+・マクロは使用しない
+disable_fiq()  FIQの禁止
+・マクロは使用しない
+enable_fiq()   FIQの許可
+・マクロは使用しない
+
+●CPUロック・割込みロック用のマクロ設計
+
+以上から次のマクロが必要になる．
+
+DAIF_CPULOCK : チップ依存部で定義
+・CPUロック状態で使用するフラグを'1'に
+
+DAIF_INTLOCK : チップ依存部で定義
+・割込みロック状態で使用するフラグを'1'に
+
+DAIF_MASK : コア依存部で定義（変更の必要なし）
+・DAIFのセットクリア命令のマスク
+・UINT_C(0xc0)
+
+DAIFSCBIT(x) : コア依存部で定義（変更の必要なし）
+・DAIFのビット定義からDAIFのセットクリア命令へのimm値へ変換
+
+     DAIF_CPULOCK    DAIF_INTLOCK   DAIF_MASK     DAISCIBIT
+(a)       ○
+(b)                      ○
+(c)       ○                           ○            ○
+(d)       ○                                         ○
+(e)       ○             ○            ○            ○
+(f)       ○                                         ○
+(g)
+(h)                                    ○
+(i)       ○
+
+利用方法
+
+(a)CPUロック状態でのF/Iフラグの状態のチェック[mrs \reg daif]
+	return((current_daif() & DAIF_CPULOCK) != 0U);
+
+(b)CPUロックまたは割込み状態でのF/Iフラグの状態マクロ[mrs \reg daif]
+	return(((((T_EXCINF *)(p_excinf))->pstate) & (DAIF_CPULOCK|DAIF_INTLOCK)) != 0U);
+
+(c)全割込み禁止状態からCPUロック状態へDAフラグもクリアしたい
+	msr DAIFClr, #DAIFSCBIT(DAIF_MASK & ~DAIF_CPULOCK)
+
+(d)CPUロック状態からCPUロック解除状態へ
+	msr DAIFClr, #DAISCBIT(DAIF_CPULOCK) 
+
+(e)割込みロック状態に変更
+	msr DAIFSet, #DAISCBIT(DAIF_INTLOCK|DAIF_CPULOCK)
+
+(f)CPUロック状態へ
+	msr DAIFSet, #DAISCBIT(DAIF_CPULOCK)
+
+(g)全割込み禁止状態からCPUロック解除状態へDAフラグもクリアしたい
+	msr DAIFClr, #DAISCBIT(DAIFSC_MASK)
+
+(h)システム状態をCPU例外発生時に
+	ldr		x0, [x20, #EXC_FRAME_pstate]
+	and		x0, x0, #DAIF_MASK
+	msr		DAIF, x0
+
+(i)F/Iフラグのいずれかをクリア/セット
+ifdef DAIF_CPULOCK == DAIF_I_BIT
+	disable_irq();
+elif DAIF_CPULOCK == DAIF_F_BIT
+	disable_fiq();
+else
+#error Set DAIF_CPUT to DAIF_I_BIT or DAIF_F_BIT
+#endif 
+
+(j)CPUロック状態または割込みロック状態かのチェック
+tst		w0, #(DAIF_CPULOCK AOR DAIF_INTLOCK)
+
+
+●割込み優先度マスクに関する設定
+
+モデル上の優先度を次の様に割り付ける．割込み段数が32の場合，
+上位5bitが実装(0 ～ 248 : 8刻み)．
+
+ IPM      TrustZoneなし   TrustZoneあり(S)  TrustZoneあり(NS)
+                                            書き込み値  GIC内優先度
+ 0(低)    0xF8(31>>3)      0x78(15>>3)        0xF0   0xF8
+-1        0xF0(30>>3)      0x70(14>>3)        0xE0   0xF0
+-2        0xE8(29>>3)      0x68(13>>3)        0xD0   0xE8
+-3        0xE0(28>>3)      0x60(12>>3)        0xD0   0xE0
+ .
+ .
+-15                           0x00            0x00   0x80
+ .
+-31       0x00                 -              
+
+
+変換式 (IPM + 31) << 3     (IPM + 15) << 3  (IPM + 15) << 4 
+
+                         
+GIC_IDLE_PRIORITY : チップ依存部で定義
+・モデル上の割込み優先度が0の場合の優先度
+
+GICC_PMR_OFFSET
+GICC_PMR_MASK
+GIC_MAX_PRIORITY
+GIC_MIN_PRIORITY
+EXT_IPM
+INT_IPM
+
+/* 外部表現への変換 */
+#define EXT_IPM(pri) \
+			(((PRI)((pri) >> GIC_PRI_SHIFT)) - ((GIC_PRI_LEVEL/2) - 1))
+
+/* 内部表現への変換 */
+#define INT_IPM(ipm) \
+			(((uint_t)((ipm) + ((GIC_PRI_LEVEL/2) - 1))) << GIC_PRI_SHIFT)
+
+PMRに関連する箇所
+
+gic_kernel_impl.c
+【GICv2】gicd_set_priority(uint8_t id, int pri) : 割込みの優先度のセット
+【GICv3/4】gicd_set_priority(uint8_t id, int pri) : 割込みの優先度のセット
+
+gic_kernel_impl.h
+ 【GICv2】gicc_set_priority(uint8_t id, int pri) : 割込みの優先度のセット
+ 【GICv2】gicc_get_priority(void) :  割込みの優先度のセット
+ 【GICv3/4】gicc_set_priority(uint8_t id, int pri) : 割込みの優先度のセット
+ 【GICv3/4】gicc_get_priority(void) :  割込みの優先度のセット
+
+gic_support.S
+ irc_begin_in : RPRの値をPMRに設定
+ irc_end_int : 割込み前の値に戻す
+ irc_get_intpri : 外部表現に変更
+ irc_begin_exc : PMRの値を取得
+ irc_end_exc : 割込み前の値に戻す
+
+
+================================================================
+GIC Redistributor ベースアドレスの扱い（gicr_base 配列の廃止）
+================================================================
+
+■ 概要
+各PEの GIC Redistributor フレーム先頭アドレスを，共有可変配列 gicr_base[]
+に保存する方式から，マクロ GICR_BASE_ADDR(x) で毎回計算する方式へ変更した．
+
+  gic_kernel_impl.h:
+    #define GICR_BASE_ADDR(x)  (GICR_BASE + GICR_SIZE * (uintptr_t)(x))
+    #define GICR_xxx(x)        (GICR_BASE_ADDR(x) + ... )
+
+  gic_kernel_impl.c: gicr_base[] 配列定義と gicr_init() 内の代入を削除．
+
+■ 変更理由（不具合の根絶）
+Redistributor 先頭は「GICR_BASE + GICR_SIZE × PEインデックス」の固定スト
+ライドで一意に決まる純粋な計算式であり，全 arm64 ターゲットの gicr_init()
+が元々この式で gicr_base[] を初期化していた．すなわち配列は計算結果の
+キャッシュにすぎない．
+
+ところがこの配列は次の理由で危険であった：
+ ・各PEが gicr_init() で gicr_base[自PE] を「データキャッシュON」で書く．
+ ・一方 per-PE の L1 ページテーブル（arm64.c の tt_pri）は，オーナPEが
+   mmu_init() で「キャッシュOFF」のまま DRAM へ直接書く．
+ ・両者がリンカ配置で同一キャッシュライン上に隣接すると，あるPEの
+   gicr_base 書込みでキャッシュに載ったライン（古いページテーブル値を
+   含む）が writeback され，他PEがキャッシュOFFで書いた有効なテーブル
+   エントリを DRAM 上で上書きする（false sharing）．結果，MMU walk で
+   未マップ例外を起こす（SMP 4コアで顕在化）．
+
+従来はこれを「gicr_base[] をキャッシュライン境界に整列してページテーブル
+と別ラインに分離する」対症療法で回避していた．本変更では配列そのものを
+廃止し，共有書込み先を無くすことで不具合を根本から除去する（計算は配列
+ロードより軽量でもある）．
+
+■ 配列ごとの整列は新たに必要にならないか（検討）
+不要である．false sharing の一方の当事者（キャッシュONで書かれる
+gicr_base）が消えるため，キャッシュOFFで書かれるページテーブル側に新た
+な整列を追加する必要はない．ページテーブル配列 tt_pri は
+
+  static uintptr_t tt_pri_prcN[TT_FIRST_ENTRY_NUM]
+                     __attribute__((aligned(TT_FIRST_SIZE)));
+
+であり，TT_FIRST_SIZE は arm64.h で下限 64（= ARM64_CACHELINE_SIZE = キャッシュ
+ライン長）が保証されている（(TT_ENTRY_SIZE*TT_FIRST_ENTRY_NUM) が 64 以下
+なら 64 に切り上げ）．よって各 tt_pri はキャッシュライン境界に整列し，かつ
+サイズもライン長の整数倍となるため，他のどの変数とも同一ラインを共有し
+ない（自己隔離）．他のキャッシュON書込み変数が隣接しても安全である．
+
+■ 前提条件
+Redistributor が「GICR_BASE から GICR_SIZE 刻みで連続配置」であること．
+GICv3/4 で再分配器が不連続配置の SoC では本式は使えず，GICR_TYPER の
+アフィニティ照合による探索が必要になる（その場合は別途実装する）．i.MX95
+を含む現行 arm64 ターゲットはいずれも固定ストライドであり問題ない．
+
+
+================================================================
+TTSP3 ソフト制御クロックと cval_shared（MP専用）の扱い
+================================================================
+
+■ TOPPERS_RUN_TTSP3 について
+ARM64 のコア内蔵タイマ(Generic Timer)はカウンタを停止できないため，TTSP3
+の決定論的テストでは時刻を凍結・制御する必要がある．そこで TTSP3 ビルド時
+(TOPPERS_RUN_TTSP3 定義時)のみ，ソフト制御クロック(stop_tick / gain_tick)で時刻
+を進める方式を core_timer.h/.c に用意している．TOPPERS_RUN_TTSP3 は ARM64 共通の
+仕組みであり，各ターゲットの ttsp_target.sh の CONFIG_OPT が -DTOPPERS_RUN_TTSP3
+を付与する（本番ビルドでは未定義＝当該コードは全てコンパイル対象外）．
+TTSP3 ターゲットを持たないターゲット(zynqmp, stm32mp2, agilex5soc 等)には
+一切影響しない．
+
+■ cval_shared は MP(2コア以上)専用
+stop_tick 中はコンパレータ割込みがマスクされるため，タイムイベントの発火は
+gain_tick が肩代わりする．単一PE では gain_tick が自PEのコンパレータを見て
+発火させれば足りるが，MP では他PEのコンパレータも発火させる必要がある．その
+ために各PEがコンパレータ値を共有配列 cval_shared[] に保存し，タイムマスタPE
+の gain_tick がこれを走査して cross-PE に割込みを pending する．
+
+cval_shared[] の実体は各ターゲットの ttsp_target_test.c が定義する（soft-clock
+変数 stop_tick/stop_time/temp_gtc/tick_int と同じ流儀）．MP 非対応の TTSP3
+ターゲット(例: imx8mm は PROCESSOR_NUM=1 の単一PE TTSP)の ttsp_target_test.c
+は cval_shared[] を定義しない．
+
+■ 共通部での参照を TNUM_PRCID >= 2 でガードする理由
+共通 core_timer.h が TOPPERS_RUN_TTSP3 だけで無条件に cval_shared[] を参照すると，
+cval_shared[] を定義しない単一PE TTSP3 ターゲット(imx8mm 等)のビルドが未定義
+シンボルでリンクできなくなる．cval_shared は本来 MP 専用機構なので，参照を
+
+  #if defined(TOPPERS_RUN_TTSP3) && (TNUM_PRCID >= 2)
+
+でガードする（宣言・set_cval・clear_event の3箇所）．これにより
+ ・単一PE TTSP3 (TNUM_PRCID==1, 例 imx8mm) : cval_shared を参照せずビルド可
+ ・MP TTSP3 (TNUM_PRCID>=2, 例 imx93/imx95): 従来どおり cross-PE 発火が機能
+となり，意味的にも(MP専用機構を MP のときだけ使う)正しい．
+
+
+================================================================
+i.MX9 ファミリのチップ依存部共有（imx9/）
+================================================================
+
+■ 背景
+i.MX93 と i.MX95 のチップ依存部(arch/arm64_gcc/imx93, imx95)はロジックが
+完全に同一で，差は SoC 固有の定数(GICR_BASE 等)とコア数(TNUM_PRCID)，名前/
+文書だけであった．重複保守(片方更新し忘れ)を避けるため共通化した．
+
+■ 構成
+  arch/arm64_gcc/imx9/        ← i.MX9 ファミリ共通の実体(1つ)
+     chip_kernel_impl.c, chip_serial.c, lpuart.c,
+     chip_kernel.h, chip_kernel_impl.h, chip_serial.h, chip_stddef.h,
+     chip_timer.h, lpuart.h, chip_kernel.trb, chip_serial.cfg,
+     chip_timer.cfg, chip_rename.def, chip_rename.h, chip_unrename.h,
+     Makefile.chip(共通ロジック)
+  arch/arm64_gcc/imx95/       ← SoC 固有(薄い)
+     imx95.h(GICR_BASE 等の #define), imx9_soc.h(= #include "imx95.h" の1行),
+     Makefile.chip(= imx9/Makefile.chip を include するだけ),
+     chip_user.txt, MANIFEST
+  arch/arm64_gcc/imx93/       ← 同様(imx93.h)
+
+■ #if を使わない SoC 切り分け
+共通コードは SoC ヘッダを実名でなく汎用名 "imx9_soc.h" で include する．
+imx9_soc.h は各 SoC dir にあり，その SoC の imx9x.h を取り込む 1 行 shim．
+ビルド時にどの SoC dir が include パスに載るかで切り替わる(下記)．共通コード
+内に #if 分岐は無い．チップ略称マクロ TOPPERS_IMX9x も chip_stddef.h(共通)
+から imx9x.h(per-SoC)へ移した(未使用マーカーだが SoC 別に保持)．
+
+■ ビルド配線
+Makefile.target の CHIP(=imx95 等) で arch/arm64_gcc/$(CHIP)/Makefile.chip を
+include する仕組みは不変．per-SoC の Makefile.chip は imx9/Makefile.chip を
+include するだけ．imx9/Makefile.chip が
+  CHIPDIR = arch/arm64_gcc/$(CHIP)   (SoC固有: imx9_soc.h, imx9x.h)
+  IMX9DIR = arch/arm64_gcc/imx9       (共通実体)
+の両方を INCLUDES/KERNEL_DIRS/SYSSVC_DIRS に追加する．共通 .c は IMX9DIR から
+コンパイルされ，SoC ヘッダは CHIPDIR から解決される．
+
+■ 検証
+imx95(6コア): ビルド＋実機6コア起動確認済．imx93(2コア): ビルド確認済
+(実機確認は後日)．新規 SoC を足す場合は arch/arm64_gcc/<soc>/ に imx9x.h ＋
+imx9_soc.h ＋ 薄い Makefile.chip ＋ target を用意するだけでよい．
+
+以上

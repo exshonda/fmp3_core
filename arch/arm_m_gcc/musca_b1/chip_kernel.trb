@@ -1,0 +1,9 @@
+# -*- coding: utf-8 -*-
+#
+#		パス2の生成スクリプトのチップ依存部（Musca-B1用）
+#
+
+#
+#  コア依存テンプレートのインクルード
+#
+IncludeTrb("core_kernel.trb")

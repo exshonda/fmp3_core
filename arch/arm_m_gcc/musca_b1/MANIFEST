@@ -1,0 +1,16 @@
+PACKAGE fmp3_arch_arm_m_gcc_musca_b1
+VERSION 3.4.0
+
+MANIFEST
+chip_asm.inc
+chip_cfg1_out.h
+chip_kernel.h
+chip_kernel_impl.c
+chip_kernel_impl.h
+chip_kernel.trb
+chip_rename.def
+chip_rename.h
+chip_sil.h
+chip_stddef.h
+chip_unrename.h
+Makefile.chip
