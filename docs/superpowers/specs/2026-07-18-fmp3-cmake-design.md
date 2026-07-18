@@ -2,8 +2,8 @@
 
 対象: `/home/honda/TOPPERS/FMP3/fmp3_core`
 
-v1 → v2 は Fable と codex の2者レビューを現物で裏取りして反映（§10）。
-v2 → v3 は **esp32_p4 を第1波に追加**したことによる（§11）。
+v1 → v2 は Fable と codex の2者レビューを現物で裏取りして反映（§11）。
+v2 → v3 は **esp32_p4 を第1波に追加**したことによる（§12）。
 
 **第1波の対象は 2 ターゲット**:
 
@@ -56,6 +56,11 @@ CMake には実害のある不具合が複数（§6）。
 決定打: **pristine FMP3 3.4.0 の Ruby cfg 自身が VERSION 1.7.1**（`cfg/cfg.rb:58`）で、
 `E_OBJ` も `pass2.rb` 側にある。つまり asp3_core 1.7.1 は上流 Ruby 1.7.1 への追従であり、
 **§7 のオラクルと版が揃う**。1.7.0 を採るとオラクルと挙動がずれる。
+
+（参考・系譜）asp3_core の Python cfg エンジン自体の発祥元は `asp3_fsp` である
+（`asp3_core/docs/dev/cfg-python.md:45` 「asp3_fspの実装済みPython版cfgをベースとする」）。
+fmp3_pico_sdk の 1.7.0 エンジンも同じ系譜の派生であり、§9.6 で述べる将来の集約先は
+系譜としても自然である。
 
 ### 1.4 移植対象の実量（v1 の見積もりは約2.5倍過小だった）
 
@@ -243,7 +248,7 @@ arch/riscv_gcc/
   common/  clic_kernel.py                              ← 派生（47行）
   esp32p4/  chip.cmake  chip_kernel.py                 ← 派生（38行）
 target/m5stamp_esp32p4_gcc/
-  target.cmake                                         ← 派生（presets.json の要否は未決。§9）
+  target.cmake                                         ← 派生（presets.json の要否は未決。§10）
   target_kernel.py  target_class.py  target_check.py
   tools/fmp_loader/                                    ← pristine（IDF ローダ殻。CMake から改変しない）
 ```
@@ -457,7 +462,208 @@ cfg 移植のバグと IDF 統合のバグを同時に出さないため（§2�
 - [ ] `FMP3_PRC_NUM` の既定値がそのチップの実コア数と合っているか
       （esp32p4 は `target_kernel.h` 既定 4 に対し実コア 2）
 
-## 9. 未決事項
+## 9. 将来の統合リポジトリ構成（fmp3_esp_idf）
+
+**ユーザから示された、確定した将来方針。** 第1波（§2・§8）の実装方針そのものを変更するものではないが、
+Task 2 以降で「chip 固有コードをどこに置くか」を判断する際の規律になるため、ここに記す。
+
+### 9.1 方針（ユーザ決定）
+
+1. **ESP32 系（S3 / 無印 ESP32 / P4）は、統合リポジトリ `fmp3_esp_idf` を新設してそこから
+   この repo（fmp3_core）を submodule として使う。** 形は asp3 系の `asp3_esp_idf` /
+   `asp3_stm32cube` と同じ（§9.2）。
+2. **chip 固有の arch コードは統合リポジトリ側に置く**（fmp3_core には入れない）。
+3. **P4 は seam 方式（実 ESP-IDF ブートローダ → カーネルへジャンプ）を今後実施する予定。**
+   S3 は既に seam 方式で動作実績がある（§9.8）。
+4. **`fmp3_pico_sdk`（既存の Pico 用 FMP3 移植）も、この repo が完成し次第
+   `asp3_pico_sdk` と同様に fmp3_core を submodule 化する予定**（§9.6）。
+
+### 9.2 前例：asp3 系統合リポジトリ（5件で確認）
+
+asp3 系には同型の統合リポジトリが**独立に5件**あり、同じ構成に収束している。1件の前例と
+5件の一致では、設計判断の裏付けとしての重みが違う。
+
+| repo | 所在（このマシン） | SDK | `arch/` |
+|---|---|---|---|
+| `asp3_fsp` | `ASP3CORE/asp3_fsp` | Renesas FSP | 有（`arm_m_gcc/ra6m5_fsp` 等） |
+| `asp3_mcuxsdk` | `ASP3CORE/asp3_mcuxsdk` | NXP MCUXpresso | 有（`arm_m_gcc/mcxn947_mcuxsdk` 等） |
+| `asp3_stm32cube` | `ASP3CORE/asp3_stm32cube` | ST STM32Cube | 有（`arm_m_gcc/stm32h5xx_stm32cube` 等） |
+| `asp3_esp_idf` | `ASP3CORE/asp3_esp_idf` | Espressif ESP-IDF | **一部**（C5 のみ独自。C3/C6 は無し） |
+| `asp3_pico_sdk` | `PICO2/asp3_pico_sdk` | RP2040/RP2350 SDK | **無し** |
+
+（`ASP3CORE/asp3_esp_idf` は `/home/honda/TOPPERS/asp3_esp_idf` からのシンボリックリンク先と同一実体。
+`asp3_esp_idf` だけ `asp3/cmake/`（ツールチェーン検証ヘルパ）が追加である。）
+
+**5件に共通する部分**：`asp3/{asp3_core（submodule）, asp3_<sdk>.cmake, target/}` は必ずある。
+
+**5件で分かれる部分（★訂正）**：`arch/` は必須ではない。**chip 依存部が asp3_core 側に
+既にあるときは、統合repo側に `arch/` を置かない。** `asp3_pico_sdk` に `arch/` が無いのは、
+`arch/riscv_gcc/rp2350` と `arch/arm_m_gcc/rp2350` が asp3_core 側に既にあるためである
+（`asp3_pico_sdk/asp3/target/pico2_riscv_sdk_gcc/target.cmake:79` の
+`include(${ASP3_ROOT_DIR}/arch/riscv_gcc/rp2350/chip.cmake)` で確認）。
+`asp3_esp_idf` の C3/C6 も同様に `${ASP3_ROOT_DIR}/arch/riscv_gcc/esp32c{3,6}/chip.cmake` を
+直接 include しており（C3/C6 の chip arch は後に asp3_core 本体へ統合された）、
+C5 だけが `${CMAKE_CURRENT_LIST_DIR}/../../arch/riscv_gcc/esp32c5/chip.cmake`
+（統合repo側）を使っている。C5 の `target.cmake` 自身のコメントに理由が明記されている：
+
+> チップ依存部はsubmodule外（asp3/arch/riscv_gcc/esp32c5/．CLAUDE.mdの禁則により
+> asp3_core submoduleを直接編集しないため。docs/c5-port-design.md §2.2で配置の妥当性を検証済み）
+
+**この C5 のパターンが、本方針の §9.1-2（chip 固有コードは fmp3_core に入れない）の直接の前例である。**
+C3/C6 は「後から submodule 側へ統合された」逆方向の経緯であり、混同しないこと。
+
+### 9.3 `ARCHDIR` / `CHIPDIR` の書き分け — 現れるのは「独自 arch を持つ repo」だけ
+
+`asp3_stm32cube/asp3/target/stm32h563_nucleo/target.cmake:9-11,99`:
+
+```cmake
+#   - 共通arch（arch/arm_m_gcc/common）は asp3_core サブモジュール側＝ASP3_ROOT_DIR
+#     ＝CMAKE_CURRENT_LIST_DIR 相対
+set(ARCHDIR ${ASP3_ROOT_DIR}/arch/arm_m_gcc)
+get_filename_component(CHIPDIR ${CMAKE_CURRENT_LIST_DIR}/../../arch/arm_m_gcc/stm32h5xx_stm32cube ABSOLUTE)
+set(TARGETDIR ${CMAKE_CURRENT_LIST_DIR})
+...
+include(${CHIPDIR}/arch.cmake)
+```
+
+**同一の `ARCHDIR`/`CHIPDIR` idiom を `asp3_fsp`（`ek_ra6m5/target.cmake:7-9,74`）と
+`asp3_mcuxsdk`（`frdmmcxn947_mcuxsdk/target.cmake:11-13,115`）でも現物確認した**（変数名まで一致）。
+一方 `asp3_esp_idf` と `asp3_pico_sdk` はこの2変数を**使っていない**（`asp3_esp_idf` は
+`ASP3_ROOT_DIR` または `CMAKE_CURRENT_LIST_DIR` からの相対パスを `include()` に直接書く。
+`asp3_pico_sdk` は `arch/` 自体が無いので `TARGETDIR` しか定義しない）。
+
+**規律のまとめ（5件から抽出。前回「4つとも同じ idiom」と書いたのは誤り）**:
+
+- `target/`・`<name>.cmake`・`asp3_core` submodule は**常に**ある。
+- `arch/` は chip 依存部が asp3_core 側に無いときだけ統合repo側に置く。
+- `ARCHDIR`/`CHIPDIR` という**名前の変数**は、独自 `arch/` を実際に持つ repo
+  （fsp・mcuxsdk・stm32cube・esp_idf の C5）でのみ現れる idiom であり、5件全部の共通構文ではない。
+  ただし「chip 依存部は `CMAKE_CURRENT_LIST_DIR` 相対、共通部・pristine は `ASP3_ROOT_DIR` 相対」
+  という**規律そのもの**は5件すべてに共通する。fmp3 側で守るべきはこの規律であり、
+  変数名の一致ではない。
+
+### 9.4 fmp3 側への適用（現物確認済み）
+
+fmp3_core（この repo）の `arch/` は `arm64_gcc arm_gcc arm_m_gcc gcc riscv_gcc tracelog` の6個、
+`arch/arm_m_gcc/` は `common musca_b1 rp2040 rp2350`、`arch/riscv_gcc/` は
+`common polarfire_soc esp32p4` である（すべて `ls` で確認）。**`arch/` は
+`tools/upstream_targets.txt` の allowlist 対象外**（同ファイルの対象は `target/` 配下のみ）
+なので、target を6個に絞り込んでも上流 arch は取り込んだ分だけ全部残る。
+
+| 統合repo | `arch/` の要否 | 根拠 |
+|---|---|---|
+| `fmp3_pico_sdk`（既存を再構成予定・§9.6） | **不要（推定）** | rp2040/rp2350 の chip arch が既に fmp3_core にある（`arch/arm_m_gcc/{rp2040,rp2350}`） |
+| `fmp3_esp_idf`（新設） | **必要（Xtensaについては確定）** | Xtensa（S3/S31）の chip arch は fmp3_core に無い（上記6個に `xtensa_gcc` は無い）。実装は `/home/honda/TOPPERS/esp32_s3/arch/xtensa_gcc/`（`common esp32 esp32s3`）に既存 |
+
+**P4 について訂正**: 前回「esp32p4 chip が fmp3_core に無い」としたのは誤り。
+**esp32p4 の基礎 chip arch（`chip_kernel.trb`・`chip_serial.c`・`Makefile.chip` 等、
+CLIC 対応を含む）は upstream pristine として `fmp3_core/arch/riscv_gcc/esp32p4/` に
+既に存在する**（`m5stamp_esp32p4_gcc` が `tools/upstream_targets.txt` の allowlist に
+入っているため）。したがって P4 の**pristine chip layer は §9.3 の規律における
+「asp3_esp_idf の C3/C6」型**（submodule 側にある）であり、C5 型ではない。
+
+ただし、ESP-IDF 統合固有の拡張（coprocessor context 管理・CLIC 経由 IPI など、upstream FMP3
+には無い ESP32 固有拡張）は別枠になる可能性が高い。姉妹プロジェクト `esp32_s3` の
+`CLAUDE.md` は将来の `fmp3_esp_idf` の配置ルールとして次の表を示している
+（**この表自体は `fmp3_esp_idf`／`esp32_s3` 側の方針であり、fmp3_core 側で確認した事実ではない
+点に注意**）:
+
+| arch層 | 場所 | 用途 |
+|---|---|---|
+| `fmp3/fmp3_core/arch/riscv_gcc/`（＝この repo の `arch/riscv_gcc/`） | pristine（触らない） | P4/S31 共通 |
+| `fmp3/arch/xtensa_gcc/` | 統合repo独自 | S3 (LX7) |
+| `fmp3/arch/riscv_gcc/esp32p4/` | 統合repo独自 | P4固有拡張（CLIC 依存の IPI、XespV/Xhwlp コプロセッサコンテキスト等） |
+
+### 9.5 想定構成：`fmp3_esp_idf`
+
+§9.2-9.4 の規律を適用すると、想定構成は次のようになる:
+
+```
+fmp3_esp_idf/
+└── fmp3/
+    ├── arch/                ← chip 固有 arch（統合repo側。xtensa_gcc は必須。
+    │                            esp32p4 の IDF 固有拡張が要る場合はここにも）
+    ├── fmp3_core/            ← submodule（この repo）
+    ├── fmp3_esp_idf.cmake    ← パス解決層（asp3_<sdk>.cmake 相当）
+    └── target/
+```
+
+**確認済みの事実**: `fmp3_esp_idf` という名前の repo は既に存在する
+（`/home/honda/TOPPERS/ESP32/fmp3_esp_idf`、remote `git@github.com:exshonda/fmp3_esp_idf.git`）。
+ただし現時点では asp3 系の submodule パターンには未移行の**萌芽状態**で、構成は
+`fmp3/{apps, arch, fmp3_core, target, docs, hal, scripts, wifi}` であり：
+
+- `fmp3/fmp3_core/` は**空ディレクトリ**（`fmp3/fmp3_core/fmp3_core/` という中身の無い置き場のみ）で、
+  `.gitmodules` には `hal`（`esp-hal-3rdparty`）しか登録されていない。**`fmp3_core` はまだ
+  submodule 化されていない。**
+- `fmp3/arch/` には既に `riscv_gcc/esp32p4/` と `xtensa_gcc/{common,esp32s3}/` の器がある。
+- `fmp3/target/` には `esp32p4_evb_gcc/` `esp32s3_devkitc_gcc/` があるが中身は `.gitkeep` のみ。
+- 同 repo の `CLAUDE.md` は「`fmp3/fmp3_core/` 配下は編集禁止」「将来 `fmp3_core` リポの
+  submodule に切り替える予定」と明記しており、**§9.1 の方針と整合する**（先取りして書かれていた）。
+
+### 9.6 `fmp3_pico_sdk` の将来：submodule化と cfg エンジンの集約
+
+**ユーザ方針**（§9.1-4）: `fmp3_pico_sdk`（`github.com/exshonda/fmp3_pico_sdk`）も、
+この repo（fmp3_core）が完成し次第、`asp3_pico_sdk` と同様に fmp3_core を submodule 化する。
+
+**現状（確認済み）**: 現在の `fmp3_pico_sdk`（作業コピーで確認）は `cfg/ kernel/ arch/ target/
+library/ syssvc/ include/ utils/` を**すべて自前で抱える一枚岩**であり、`asp3_pico_sdk` が
+既に持っている「`asp3_core` submodule + 統合repo」の分離構成には**まだ移行していない**。
+`fmp3_pico_sdk/cfg/cfg.py:60` の `VERSION = "1.7.0"` は §1.2-1.3 で参照した通りで、
+fmp3_core が今後 `cfg_py/` へ 1.7.1 を持つのと世代が異なる。
+
+**これは計画Bの位置づけを変える。** 現在 `fmp3_pico_sdk` が抱えている Python cfg 一式
+（`cfg/` の 1.7.0 エンジンと `kernel/*.py` テンプレート、§1.2 参照）は、submodule 化が
+実施されれば fmp3_core 側（`cfg_py/`・`kernel/`）に一本化されることになる。
+**つまり計画Bのテンプレート移植は「fmp3_core のために新規に書く」だけでなく、
+将来的には `fmp3_pico_sdk` 側の重複（1.7.0 エンジンと `.py` テンプレート）を
+解消する作業でもある。** 順序としては、まず本設計（§1.3 決定のとおり 1.7.1 エンジンを
+オラクルと版を揃えて fmp3_core に構築し）、その後 `fmp3_pico_sdk` を移行させて
+1.7.0 側を廃止する、という流れになる見込み（推測。移行手順自体は未設計）。
+
+### 9.7 Xtensa arch について（事実）
+
+- 上流 FMP3 3.4.0 の pristine に Xtensa の arch は無い（この repo の `arch/` は
+  `arm64_gcc arm_gcc arm_m_gcc gcc riscv_gcc tracelog` のみ。§9.4 で `ls` 確認済み）。
+- Xtensa LX7（ESP32-S3）の FMP3 移植は `/home/honda/TOPPERS/esp32_s3/arch/xtensa_gcc/`
+  （`common esp32 esp32s3`）に既存。
+- §9.1-2 のとおり、これは**fmp3_core には入れず統合リポジトリ側に置く**。
+
+### 9.8 起動方式が3種類あること
+
+| 方式 | 前例 | 起動経路 |
+|---|---|---|
+| Direct Boot | asp3_esp_idf の C3/C6（既定） | フラッシュ先頭マジック → `start.S` → `sta_ker` |
+| seam boot | asp3_esp_idf C5 の `ASP3_SEAM_BOOT`、esp32_s3 の seam-S3 | 実 IDF ブートローダ → カーネルへジャンプ |
+| ローダ殻 | FMP3 上流の m5stamp_esp32p4（方式(a)、§3.1） | IDF アプリが `libfmp3.a` をリンク |
+
+**S3 は seam 方式で実機動作実績がある**（`/home/honda/TOPPERS/esp32_s3/CLAUDE.md:6`）:
+
+> S3(LX7) seam-S3 bring-up(実ESP-IDF bootloader→FMP3、hello/W1/W2達成)
+
+同ファイル（`:130-134`）はさらに「標準は seam（実ESP-IDF 2nd-stage bootloader →
+FMP3自前エントリ直接ジャンプ、FreeRTOS非リンク）に一本化した」「S3・LX6(無印ESP32)とも
+hello/W1/W2 が実機parity達成済み」としている。
+
+**§3.1 への重要な訂正**: 設計書 §3.1 は、上流 m5stamp_esp32p4 の方式(a)（ローダ殻＋
+`libfmp3.a`）を前提に書かれている。上流が方式(b)（完全独立 ELF + elf2image）を棄却した根拠
+（`idf_image_integration.md:9` の `bootloader_utility.c:842` の `assert(rom_index==2)`）は
+**elf2image 方式を否定するものであって、seam boot や Direct Boot を否定するものではない**。
+将来 P4 を seam 方式でやる場合、§3.1 の「ライブラリモード」の位置づけは見直しが要る
+（ライブラリモードは方式(a)専用の要件であり、seam 方式では最終 ELF を fmp3_core 側で
+リンクできる可能性がある）。**ただし `FMP3_LIBRARY_ONLY` オプション自体は、他の外部 SDK
+統合（asp3_esp_idf 型のライブラリ組込み等）でも使える可能性があり、残す価値がある。**
+
+### 9.9 計画Aへの影響
+
+**計画Aを変更する必要は無い。** Task 1 が作った `fmp3_core.cmake` は既に
+`-DFMP3_TARGET_DIR=<絶対パス>` による外部ターゲット供給に対応している（`fmp3_core.cmake:9-30`
+で確認済み。`FMP3_TARGET_DIR` が未指定なら `FMP3_ROOT_DIR/target/<t>`、指定されれば
+そのディレクトリの `target.cmake` を探す）。唯一の追加制約は §9.3 の「chip 依存部は
+`CMAKE_CURRENT_LIST_DIR` 相対、共通部・pristine は `FMP3_ROOT_DIR`（asp3 の `ASP3_ROOT_DIR`
+に相当）相対」という書き分けであり、これは Task 2 の実装時に守る。
+
+## 10. 未決事項
 
 - syssvc / library の取り込み方（asp3_core の `asp3_add_syssvc()` 関数方式を採る想定）。
 - FMP3 の syssvc がプロセッサごとの `logtask` / `serial` 構成を要求するかは未確認。
@@ -483,7 +689,7 @@ esp32p4 に伴うもの:
   実際の `build_fmp3_lib.sh` の既定は `tools/fmp_app` / `PRC_NUM=2` である
   （コメントが陳腐化している）。移植時にどちらを既定とするか要確認。
 
-## 10. v1 からの変更点（レビュー反映）
+## 11. v1 からの変更点（レビュー反映）
 
 すべて現物で裏取り済み。
 
@@ -504,7 +710,7 @@ esp32p4 に伴うもの:
 `work/fmp3_3.3` と `work/fmp3_3.4` の通常 diff で代替した結果 `kernel/` しか見ておらず、
 `arch/riscv_gcc/` が丸ごと新規である事実に届いていない。#5 のとおり Fable が正しい。
 
-## 11. v2 からの変更点（esp32_p4 の第1波追加）
+## 12. v2 からの変更点（esp32_p4 の第1波追加）
 
 すべて現物で確認済み。
 
