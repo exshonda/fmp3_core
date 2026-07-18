@@ -331,3 +331,52 @@ add_custom_command(
 #
 add_custom_target(cfg1_out_syms DEPENDS ${CFG1_OUT_SYMS_FILE})
 add_custom_target(cfg1_out_srec DEPENDS ${CFG1_OUT_SREC_FILE})
+
+#
+#  cfg パス2（-O）：offset.h の生成
+#
+#  上流 sample/Makefile:417-421 に相当．-O は cfg2_out.db を出力しない指定で，
+#  次の kernel_cfg 生成側が書く db を潰さないためにある．
+#
+add_custom_command(
+    OUTPUT ${OFFSET_TIMESTAMP}
+    BYPRODUCTS ${OFFSET_H_FILE}
+    WORKING_DIRECTORY ${CFG_GEN_DIR}
+    COMMAND ${CFG_COMMAND} --pass 2 -O --kernel fmp
+            ${CFG_INCLUDE_DIRS} ${CFG_CLASS_TRB_FILES} ${CFG_OFFSET_TRB_FILES}
+            --rom-symbol ${CFG1_OUT_SYMS_FILE} --rom-image ${CFG1_OUT_SREC_FILE}
+    DEPENDS ${CFG_SCRIPT_DEPS} ${FMP3_CLASS_TRB_FILES} ${FMP3_OFFSET_TRB_FILES}
+            ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_SREC_FILE} ${CFG1_OUT_TIMESTAMP}
+    COMMENT "Running cfg pass 2 to generate offset.h"
+)
+
+#
+#  cfg パス2：kernel_cfg.c / kernel_cfg.h の生成
+#
+#  上流 sample/Makefile:408-411 に相当．こちらは --rom-symbol / --rom-image を
+#  渡さない（cfg が cfg1_out.syms / cfg1_out.srec を裸の相対名で開くため，
+#  WORKING_DIRECTORY が効いている必要がある）．
+#
+#  offset.h の生成と順序を付けるため OFFSET_TIMESTAMP に依存させる
+#  （上流も同じ理由で cfg1_out.db を共有する2つの規則を分けている）．
+#
+add_custom_command(
+    OUTPUT ${KERNEL_CFG_TIMESTAMP}
+    BYPRODUCTS ${KERNEL_CFG_C_FILE} ${KERNEL_CFG_H_FILE} ${CFG_GEN_DIR}/cfg2_out.db
+    WORKING_DIRECTORY ${CFG_GEN_DIR}
+    COMMAND ${CFG_COMMAND} --pass 2 --kernel fmp
+            ${CFG_INCLUDE_DIRS} ${CFG_CLASS_TRB_FILES} ${CFG_KERNEL_CFG_TRB_FILES}
+    DEPENDS ${CFG_SCRIPT_DEPS} ${FMP3_CLASS_TRB_FILES} ${FMP3_KERNEL_CFG_TRB_FILES}
+            ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_SREC_FILE} ${OFFSET_TIMESTAMP}
+    COMMENT "Running cfg pass 2 to generate kernel_cfg.c/h"
+)
+
+#
+#  ★cfg1_out.c と同じ理由で，kernel_cfg.c を別規則の OUTPUT にしない．
+#    BYPRODUCTS で GENERATED 扱いにし，順序は add_dependencies で付ける
+#    （Task 6 の add_library が ${KERNEL_CFG_C_FILE} をソースに取る）．
+#
+add_custom_target(generate_cfg_gen_files
+    DEPENDS ${OFFSET_TIMESTAMP} ${KERNEL_CFG_TIMESTAMP}
+)
+set_source_files_properties(${KERNEL_CFG_C_FILE} PROPERTIES GENERATED TRUE)
