@@ -13,6 +13,14 @@ project(fmp3_core C ASM)
 include(${CMAKE_CURRENT_LIST_DIR}/fmp3_core.cmake)
 
 #
+#  .trb（cfg pass2 生成スクリプト）の IncludeTrb("...") 連鎖を configure
+#  時に解決する fmp3_trb_closure() をここで定義する（cfg パス2の
+#  add_custom_command から使う．Task 5 レビュー Critical 対応）．
+#  詳細は cmake/trb_depends.cmake のコメント参照．
+#
+include(${FMP3_ROOT_DIR}/cmake/trb_depends.cmake)
+
+#
 #  ライブラリ専用モード（外部 SDK アプリ向け．esp32p4 が要求する）
 #
 #  ON のとき libfmp3.a までを作り，fmp 実行ファイル・run ターゲット・
@@ -333,6 +341,32 @@ add_custom_target(cfg1_out_syms DEPENDS ${CFG1_OUT_SYMS_FILE})
 add_custom_target(cfg1_out_srec DEPENDS ${CFG1_OUT_SREC_FILE})
 
 #
+#  .trb は IncludeTrb("...") で他の .trb を再帰的に取り込む（例：
+#  target_kernel.trb → chip_kernel.trb → core_kernel.trb →
+#  kernel/kernel.trb → kernel/task.trb ...）．トップレベルの .trb
+#  （FMP3_CLASS_TRB_FILES / FMP3_OFFSET_TRB_FILES / FMP3_KERNEL_CFG_TRB_FILES）
+#  だけを DEPENDS に積むと，間接的に取り込まれる .trb を編集しても
+#  再生成されない（Task 5 レビュー Critical）．fmp3_trb_closure()
+#  （cmake/trb_depends.cmake）で IncludeTrb 連鎖を configure 時に辿り，
+#  閉包を DEPENDS に足す．
+#
+#  ★INCLUDE_DIRS 引数には FMP3_INCLUDE_DIRS をそのまま渡す．これは
+#    CFG_INCLUDE_DIRS（"-I<dir>" 形式）の元になった同じ変数・同じ並び順
+#    であり，cfg/cfg.rb の $includeDirectories と一致する．
+#
+#  ★閉包の結果を CMAKE_CONFIGURE_DEPENDS に足し，閉包に入っている
+#    .trb の中身が変わって IncludeTrb(...) の集合が変化したときに
+#    configure をやり直させる（cmake/trb_depends.cmake 冒頭コメント
+#    参照）．
+#
+fmp3_trb_closure(FMP3_OFFSET_TRB_CLOSURE ${CFG_GEN_DIR} "${FMP3_INCLUDE_DIRS}"
+    ${FMP3_CLASS_TRB_FILES} ${FMP3_OFFSET_TRB_FILES})
+fmp3_trb_closure(FMP3_KERNEL_CFG_TRB_CLOSURE ${CFG_GEN_DIR} "${FMP3_INCLUDE_DIRS}"
+    ${FMP3_CLASS_TRB_FILES} ${FMP3_KERNEL_CFG_TRB_FILES})
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${FMP3_OFFSET_TRB_CLOSURE} ${FMP3_KERNEL_CFG_TRB_CLOSURE})
+
+#
 #  cfg パス2（-O）：offset.h の生成
 #
 #  上流 sample/Makefile:417-421 に相当．-O は cfg2_out.db を出力しない指定で，
@@ -347,6 +381,7 @@ add_custom_command(
             --rom-symbol ${CFG1_OUT_SYMS_FILE} --rom-image ${CFG1_OUT_SREC_FILE}
     DEPENDS ${CFG_SCRIPT_DEPS} ${FMP3_CLASS_TRB_FILES} ${FMP3_OFFSET_TRB_FILES}
             ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_SREC_FILE} ${CFG1_OUT_TIMESTAMP}
+            ${FMP3_OFFSET_TRB_CLOSURE}
     COMMENT "Running cfg pass 2 to generate offset.h"
 )
 
@@ -357,8 +392,14 @@ add_custom_command(
 #  渡さない（cfg が cfg1_out.syms / cfg1_out.srec を裸の相対名で開くため，
 #  WORKING_DIRECTORY が効いている必要がある）．
 #
-#  offset.h の生成と順序を付けるため OFFSET_TIMESTAMP に依存させる
-#  （上流も同じ理由で cfg1_out.db を共有する2つの規則を分けている）．
+#  offset.h の生成と順序を付けるため OFFSET_TIMESTAMP に依存させる．
+#  ★上流 sample/Makefile:405-421 に同じ依存辺は無い（kernel_cfg.timestamp・
+#    offset.timestamp はどちらも独立に cfg1_out.db/.syms/.$(DUMP) にのみ
+#    依存し，make -j では並列に走り得る．-O 側は $omitOutputDb により
+#    cfg2_out.db を書かないため衝突しない）．ここで順序を付けているのは
+#    上流を再現するためではなく，CMake 側の安全側の判断（両方が同じ
+#    cfg1_out.db を pass1 出力として共有する；実害は無いが依存を単純化
+#    できる）であり，無害だが上流にはこの順序制約は無い．
 #
 add_custom_command(
     OUTPUT ${KERNEL_CFG_TIMESTAMP}
@@ -368,6 +409,7 @@ add_custom_command(
             ${CFG_INCLUDE_DIRS} ${CFG_CLASS_TRB_FILES} ${CFG_KERNEL_CFG_TRB_FILES}
     DEPENDS ${CFG_SCRIPT_DEPS} ${FMP3_CLASS_TRB_FILES} ${FMP3_KERNEL_CFG_TRB_FILES}
             ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_SREC_FILE} ${OFFSET_TIMESTAMP}
+            ${FMP3_KERNEL_CFG_TRB_CLOSURE}
     COMMENT "Running cfg pass 2 to generate kernel_cfg.c/h"
 )
 
