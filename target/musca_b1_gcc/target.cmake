@@ -89,3 +89,75 @@ include(${CHIPDIR}/chip.cmake)
 #    （FMP3_CFG1_OUT_LINK_OPTIONS）も不要（Task 4 で cfg1_out.syms に
 #    TOPPERS_magic_number が --no-gc-sections 無しでも残ることを確認する）．
 #
+
+#
+#  QEMU（musca-b1 マシン）
+#
+#  ★システムの /usr/bin/qemu-system-arm は 8.2.2 であり，上流
+#    target_user.txt:47-55 が要求する「MHU（プロセッサ間割込み）と
+#    SSE-200 のセカンダリコア起動（CPUWAIT）が正しく実装されたバージョン」
+#    （動作確認済みは QEMU 11.0.1 系）を満たさない可能性がある．
+#    /home/honda/qemu-build/install/bin/qemu-system-arm に 11.0.1 が
+#    ビルド済みであれば既定でそちらを使う．無ければ PATH 上の
+#    qemu-system-arm にフォールバックする（1コアなら 8.2.2 でも動く．
+#    musca-b1 マシン自体は 8.2.2 にも存在する．実測済み）．
+#
+set(_fmp3_musca_qemu_builtin /home/honda/qemu-build/install/bin/qemu-system-arm)
+if(EXISTS ${_fmp3_musca_qemu_builtin})
+    set(_fmp3_musca_qemu_default ${_fmp3_musca_qemu_builtin})
+else()
+    set(_fmp3_musca_qemu_default qemu-system-arm)
+endif()
+set(QEMU_SYSTEM_ARM_MUSCA_B1 ${_fmp3_musca_qemu_default} CACHE STRING
+    "Path to qemu-system-arm for the musca-b1 machine (needs >= 11.0.1 for reliable 2-processor MHU/CPUWAIT support; see target_user.txt:47-55)")
+unset(_fmp3_musca_qemu_builtin)
+unset(_fmp3_musca_qemu_default)
+
+#
+#  実測でバージョンを確認し，11 未満なら警告する（黙って古い QEMU を
+#  使ってしまう事故を防ぐ．8.2.2 では 2 コア SMP の MHU が未実装で
+#  クロスコア IPI が機能しないことがある．1コアは影響を受けない）．
+#
+execute_process(
+    COMMAND ${QEMU_SYSTEM_ARM_MUSCA_B1} --version
+    OUTPUT_VARIABLE _fmp3_qemu_version_output
+    RESULT_VARIABLE _fmp3_qemu_version_result
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(_fmp3_qemu_version_result EQUAL 0 AND _fmp3_qemu_version_output MATCHES "version ([0-9]+)\\.")
+    set(_fmp3_qemu_major ${CMAKE_MATCH_1})
+    message(STATUS "fmp3_core: QEMU_SYSTEM_ARM_MUSCA_B1 version = ${_fmp3_qemu_version_output}")
+    if(_fmp3_qemu_major LESS 11)
+        message(WARNING
+            "fmp3_core: QEMU_SYSTEM_ARM_MUSCA_B1='${QEMU_SYSTEM_ARM_MUSCA_B1}' reports "
+            "major version ${_fmp3_qemu_major} (< 11). target_user.txt:47-55 notes that "
+            "older QEMU may lack MHU emulation, which breaks cross-core IPI for "
+            "FMP3_PRC_NUM=2 builds. 1-processor builds are unaffected. Override with "
+            "-DQEMU_SYSTEM_ARM_MUSCA_B1=<path to qemu-system-arm >= 11.0.1> if available "
+            "(e.g. /home/honda/qemu-build/install/bin/qemu-system-arm).")
+    endif()
+    unset(_fmp3_qemu_major)
+else()
+    message(WARNING
+        "fmp3_core: could not determine the version of "
+        "QEMU_SYSTEM_ARM_MUSCA_B1='${QEMU_SYSTEM_ARM_MUSCA_B1}' (is it installed / on PATH?).")
+endif()
+unset(_fmp3_qemu_version_output)
+unset(_fmp3_qemu_version_result)
+
+#
+#  QEMU による実行（cmake --build <dir> --target run）
+#
+#  Musca-B1 はボード構成として2コアが固定されているため -smp オプションは
+#  不要（単一の -kernel を両コアが参照する．二次コアの起動は QEMU 側では
+#  なくカーネル側の target_mprc_initialize が CPUWAIT レジスタを操作して
+#  行う）．-device loader も -bios none も不要（polarfire と違い，直接
+#  _kernel_start から起動する）．
+#
+#  出典: target/musca_b1_gcc/target_user.txt:75-83
+#
+set(FMP3_RUN_COMMAND
+    ${QEMU_SYSTEM_ARM_MUSCA_B1} -machine musca-b1 -cpu cortex-m33
+    -kernel $<TARGET_FILE:fmp> -nographic
+    -semihosting-config enable=on,target=native
+)
