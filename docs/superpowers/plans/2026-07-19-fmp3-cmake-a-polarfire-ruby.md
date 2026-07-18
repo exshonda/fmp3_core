@@ -60,8 +60,14 @@
   - `fmp3_add_syssvc(TARGET)`（関数。非TECS版システムサービスと library の `.c` を `TARGET` に追加する）
   - `FMP3_SYSSVC_TARGET_C_FILES`（リスト。`fmp3_add_syssvc` が読む。chip.cmake が積む）
   - ツールチェーン同定の検査（`cmake/toolchain_check.cmake`）：`${CMAKE_C_COMPILER} -dumpmachine`
-    の出力に `riscv64` を含まない場合，configure 時に FATAL_ERROR で止める（ホスト gcc への
-    フォールバックを検出して事故を防ぐ）。`fmp3_core.cmake` の先頭で `project()` 後に include する。
+    の出力を，ツールチェーンファイルが宣言する `FMP3_EXPECTED_TOOLCHAIN_MACHINE`（例
+    `cmake/toolchain-riscv64.cmake` は `riscv64`）と MATCHES で照合する。一致しなければ
+    configure 時に FATAL_ERROR で止める（ホスト gcc へのフォールバックを検出して事故を防ぐ）。
+    期待値が未宣言のときは，`CMAKE_TOOLCHAIN_FILE` も未指定なら FATAL_ERROR（ホスト gcc への
+    フォールバック濃厚），`CMAKE_TOOLCHAIN_FILE` は指定されているが期待値だけ未宣言なら
+    `message(STATUS ...)` を出して検査をスキップする（将来 ARM 系のツールチェーンファイルが
+    宣言を忘れても無関係な FATAL で止めないため）。`-DFMP3_EXPECTED_TOOLCHAIN_MACHINE=<pattern>`
+    で上書き可能。`fmp3_core.cmake` の先頭で `project()` 後に include する。
 
 - [ ] **Step 1: 環境の前提を実測で確認する（これが崩れると以降が全部崩れる）**
 
@@ -127,6 +133,23 @@ Expected: FAIL — `No such preset in ...: "polarfire_soc_kit-qemu"`（`CMakePre
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR riscv64)
 
+#
+#  cmake/toolchain_check.cmake が照合する「このツールチェーンファイルが
+#  期待する -dumpmachine パターン」．«未定義のときだけ» 既定を与える（素の
+#  set() だとコマンドラインの -D を黙って上書きしてしまい，-D による上書き
+#  手段が「効かない案内＝嘘」になる。asp3_esp_idf の C5 で実際に踏んだ罠：
+#  asp3/target/esp32c6_espidf/target.cmake:44-47）。
+#
+#  申し送り（将来 ARM 系 = Cortex-M/A/R のツールチェーンファイルを足す人へ）：
+#  同じ要領で自分のツールチェーンファイルにも FMP3_EXPECTED_TOOLCHAIN_MACHINE を
+#  宣言すること（例 arm-none-eabi）。宣言を忘れても FATAL_ERROR にはならない
+#  （toolchain_check.cmake は「期待値が未定義なら検査を行わない」設計）が，
+#  検査が効かなくなる。STATUS ログに出るので見落としに注意。
+#
+if(NOT DEFINED FMP3_EXPECTED_TOOLCHAIN_MACHINE)
+    set(FMP3_EXPECTED_TOOLCHAIN_MACHINE riscv64)
+endif()
+
 if(NOT DEFINED RISCV64_TOOLCHAIN_PREFIX)
     set(RISCV64_TOOLCHAIN_PREFIX riscv64-unknown-elf-)
 endif()
@@ -150,6 +173,29 @@ Ubuntu 汎用 GCC でビルドされていた。`asp3/target/esp32c6_espidf/targ
 を防ぐ。`toolchain-riscv64.cmake` は `CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY` を
 設定しているため，ホストの gcc でも `try_compile` が通ってしまい，同じ穴がある。
 
+**当初「`-dumpmachine` に `riscv64` を含まなければ FATAL」という固定判定で実装したが，
+これはレビューで2つの欠陥が指摘された：**
+1. **RV32 を弾く**（ESP32-P4 の HP コアは RV32IMAFC，ESP32-C6 も RV32。将来
+   `fmp3_esp_idf` が本 repo を submodule として `riscv32-esp-elf-gcc` で configure すると，
+   正当な構成が FATAL_ERROR で止まり，回避手段も無い）。
+2. **本 repo は RISC-V 専用ではない**（取り込み済み `target/` のうち `musca_b1_gcc` /
+   `rp2350_pico2_gcc` は Cortex-M，`kria_arm64_gcc` は AArch64，`kria_r5_gcc` は
+   Cortex-R。これらを CMake 化した時点で全部弾かれる）。
+
+**そこで判定基準はツールチェーンファイル自身に宣言させる**設計に改めた：
+`cmake/toolchain-riscv64.cmake` が `FMP3_EXPECTED_TOOLCHAIN_MACHINE` に自分の期待パターン
+（RV64 なので `riscv64`）を設定し，`toolchain_check.cmake` はその変数と `-dumpmachine` の
+出力を照合するだけにする。期待値が未定義のときは検査を行わない（将来 ARM 系のツールチェーン
+ファイルを足す人が宣言し忘れても，無関係な FATAL で止まらないように）。ただし黙って素通り
+させると「診断可能な失敗」が「謎の失敗」に劣化する（asp3_esp_idf の C5/C6 比較で実測済み）
+ので，その場合は `message(STATUS ...)` で検査を行わなかった旨を出す。さらに，期待値が未定義
+かつ `CMAKE_TOOLCHAIN_FILE` も未指定（＝ホスト gcc へのフォールバックが濃厚）なときは，
+これまで通り FATAL_ERROR で止める。`-DFMP3_EXPECTED_TOOLCHAIN_MACHINE=<pattern>` で上書き
+可能とし，ツールチェーンファイル側は素の `set()` ではなく `if(NOT DEFINED ...)` で既定を
+与える（素の `set()` だとコマンドラインの `-D` を黙って上書きし，エラーメッセージが案内する
+退避先が「効かない案内＝嘘」になる。asp3_esp_idf の C5 で実際に踏んだ罠：
+`asp3/target/esp32c6_espidf/target.cmake:44-47`）。
+
 まず `-dumpmachine` の出力形式を実測する:
 ```bash
 riscv64-unknown-elf-gcc -dumpmachine
@@ -161,6 +207,13 @@ riscv64-unknown-elf
 x86_64-linux-gnu
 ```
 → クロスは `riscv64` を含み，ホストは含まない。この差で判定する。
+
+`cmake/toolchain-riscv64.cmake`（抜粋。期待値の宣言）:
+```cmake
+if(NOT DEFINED FMP3_EXPECTED_TOOLCHAIN_MACHINE)
+    set(FMP3_EXPECTED_TOOLCHAIN_MACHINE riscv64)
+endif()
+```
 
 `cmake/toolchain_check.cmake`:
 ```cmake
@@ -175,8 +228,16 @@ x86_64-linux-gnu
 #  target.cmake:18-33，build/ 配下 320 構成のうち 164 構成がホストの
 #  Ubuntu 汎用 GCC でビルドされていた）．
 #
-#  configure 時に `${CMAKE_C_COMPILER} -dumpmachine` の出力を見て，
-#  RISC-V ベアメタル向けでなければ即座に FATAL_ERROR で止める。
+#  fmp3_core は RISC-V 専用ではないので「riscv64 でなければ弾く」という固定
+#  判定は書けない．判定基準はツールチェーンファイル自身に FMP3_EXPECTED_
+#  TOOLCHAIN_MACHINE として宣言させ，本ファイルはそれと MATCHES で照合する
+#  だけにする．期待値が未宣言で CMAKE_TOOLCHAIN_FILE も未指定なら FATAL_ERROR，
+#  期待値だけ未宣言（CMAKE_TOOLCHAIN_FILE はある）なら STATUS で検査省略を
+#  告知してスキップする．-DFMP3_EXPECTED_TOOLCHAIN_MACHINE=<pattern> で上書き
+#  可能（ツールチェーンファイル側は if(NOT DEFINED ...) で既定を与えるので，
+#  この -D は黙って上書きされない）．
+#
+#  configure 時に `${CMAKE_C_COMPILER} -dumpmachine` の出力を見る。
 #  コンパイラは project() が実行されるまで確定しないため，本ファイルは
 #  project() の後（fmp3_core.cmake の先頭）から include すること．
 #
@@ -196,20 +257,49 @@ if(NOT FMP3_DUMPMACHINE_RESULT EQUAL 0)
         "or use a CMake preset that sets it (e.g. --preset polarfire_soc_kit-qemu)?")
 endif()
 
-if(NOT FMP3_C_COMPILER_MACHINE MATCHES "riscv64")
+if(DEFINED FMP3_EXPECTED_TOOLCHAIN_MACHINE)
+    if(NOT FMP3_C_COMPILER_MACHINE MATCHES "${FMP3_EXPECTED_TOOLCHAIN_MACHINE}")
+        message(FATAL_ERROR
+            "CMAKE_C_COMPILER ('${CMAKE_C_COMPILER}') reports target machine "
+            "'${FMP3_C_COMPILER_MACHINE}' (via -dumpmachine), which does not match "
+            "the expected pattern '${FMP3_EXPECTED_TOOLCHAIN_MACHINE}' "
+            "(FMP3_EXPECTED_TOOLCHAIN_MACHINE, declared by the toolchain file and/or "
+            "overridden with -DFMP3_EXPECTED_TOOLCHAIN_MACHINE=<pattern>). Configuring "
+            "with a mismatched compiler silently produces a binary for the WRONG "
+            "target, because CMAKE_TRY_COMPILE_TARGET_TYPE is STATIC_LIBRARY here and "
+            "try_compile does not fail against a mismatched (even host) gcc "
+            "(this exact mistake caused 164/320 misbuilt configurations in the sibling "
+            "asp3_esp_idf project: asp3/target/esp32c6_espidf/target.cmake:18-33). "
+            "Fix: pass the matching -DCMAKE_TOOLCHAIN_FILE (or use a CMake preset that "
+            "sets it, e.g. --preset polarfire_soc_kit-qemu), check that the toolchain "
+            "prefix variable (e.g. RISCV64_TOOLCHAIN_PREFIX) matches an installed cross "
+            "toolchain, or override -DFMP3_EXPECTED_TOOLCHAIN_MACHINE=<pattern> if this "
+            "toolchain file's default expectation genuinely does not apply here.")
+    endif()
+elseif(CMAKE_TOOLCHAIN_FILE)
+    message(STATUS
+        "fmp3_core: toolchain identity check skipped -- CMAKE_TOOLCHAIN_FILE="
+        "'${CMAKE_TOOLCHAIN_FILE}' does not declare FMP3_EXPECTED_TOOLCHAIN_MACHINE "
+        "(compiler '${CMAKE_C_COMPILER}' reports '${FMP3_C_COMPILER_MACHINE}' via "
+        "-dumpmachine, unverified). This is expected for toolchain files that have "
+        "not yet adopted the check; it is NOT verified against FMP3_TARGET. Add "
+        "'set(FMP3_EXPECTED_TOOLCHAIN_MACHINE <pattern>)' to the toolchain file "
+        "(see cmake/toolchain-riscv64.cmake) or pass "
+        "-DFMP3_EXPECTED_TOOLCHAIN_MACHINE=<pattern> to enable it.")
+else()
     message(FATAL_ERROR
-        "CMAKE_C_COMPILER ('${CMAKE_C_COMPILER}') reports target machine "
-        "'${FMP3_C_COMPILER_MACHINE}' (via -dumpmachine), which is not a riscv64 "
-        "toolchain. fmp3_core targets RISC-V bare metal only; configuring with a "
-        "host compiler silently produces a binary for the HOST, not the target "
-        "firmware, because CMAKE_TRY_COMPILE_TARGET_TYPE is STATIC_LIBRARY here and "
-        "try_compile does not fail against a host gcc "
+        "No CMAKE_TOOLCHAIN_FILE was given, so CMAKE_C_COMPILER='${CMAKE_C_COMPILER}' "
+        "is presumed to be the HOST compiler (it reports target machine "
+        "'${FMP3_C_COMPILER_MACHINE}' via -dumpmachine, and no "
+        "FMP3_EXPECTED_TOOLCHAIN_MACHINE was declared to check it against). fmp3_core "
+        "is a bare-metal cross-build; configuring with the host compiler silently "
+        "produces a binary for the HOST, not the target firmware, because "
+        "CMAKE_TRY_COMPILE_TARGET_TYPE is STATIC_LIBRARY here and try_compile does "
+        "not fail against a host gcc "
         "(this exact mistake caused 164/320 misbuilt configurations in the sibling "
         "asp3_esp_idf project: asp3/target/esp32c6_espidf/target.cmake:18-33). "
         "Fix: pass -DCMAKE_TOOLCHAIN_FILE=${FMP3_ROOT_DIR}/cmake/toolchain-riscv64.cmake "
-        "(or use a CMake preset that sets it, e.g. --preset polarfire_soc_kit-qemu), and "
-        "check that RISCV64_TOOLCHAIN_PREFIX (default 'riscv64-unknown-elf-') matches an "
-        "installed RISC-V cross toolchain.")
+        "(or use a CMake preset that sets it, e.g. --preset polarfire_soc_kit-qemu).")
 endif()
 ```
 
@@ -456,24 +546,59 @@ Expected: `CMake Error at fmp3_core.cmake (message):` に続けて
 `FMP3_TARGET is not defined. Use a preset (e.g. --preset polarfire_soc_kit-qemu) or -DFMP3_TARGET=<target>.`
 を含む FATAL_ERROR、`exit=1`。
 
-- [ ] **Step 13: ツールチェーン同定の検査を positive/negative control で確認する**
+- [ ] **Step 13: ツールチェーン同定の検査を4パターンで確認する**
 
-positive control（正しいツールチェーンでは通る）:
+**(a) positive control**（正しいツールチェーンでは通る）:
 ```bash
 cmake --preset polarfire_soc_kit-qemu 2>&1 | grep -E 'fmp3_core:|Configuring done'
 ```
 Expected: Step 10 と同じく `Configuring done` まで到達する（`toolchain_check.cmake` が
-`riscv64-unknown-elf-gcc` を正しく `riscv64` と認識し，通過することの確認）。
+`riscv64-unknown-elf-gcc` の `-dumpmachine`＝`riscv64-unknown-elf` を，
+`toolchain-riscv64.cmake` が宣言する `FMP3_EXPECTED_TOOLCHAIN_MACHINE=riscv64` と正しく
+MATCHES し，通過することの確認）。
 
-negative control（ツールチェーンファイルを渡し忘れると，configure 時にこの検査で止まる）:
+**(b) negative control**（ツールチェーンファイルを渡し忘れると，configure 時にこの検査で止まる）:
 ```bash
 cmake -G Ninja -B /tmp/fmp3-hostgcc -S . -DFMP3_TARGET=polarfire_soc_kit_gcc
 echo "exit=$?"
 ```
 Expected: `CMake Error at cmake/toolchain_check.cmake (message):` に続けて
-`CMAKE_C_COMPILER ('...') reports target machine 'x86_64-linux-gnu' ... is not a riscv64 toolchain`
-を含む FATAL_ERROR、`exit=1`。**ビルド途中の分かりにくいエラーではなく，configure 時点で
-止まること**を確認する（`ninja` や `make` まで進んでからのリンクエラー等ではない）。
+`No CMAKE_TOOLCHAIN_FILE was given, so CMAKE_C_COMPILER='/usr/bin/cc' is presumed to be
+the HOST compiler ...` を含む FATAL_ERROR、`exit=1`。**ビルド途中の分かりにくいエラーでは
+なく，configure 時点で止まること**を確認する（`ninja` や `make` まで進んでからのリンク
+エラー等ではない）。
+
+**(c) RV32 を誤って弾かないことの実演**（実機の `riscv32-esp-elf-gcc` が無いため，
+`-DFMP3_EXPECTED_TOOLCHAIN_MACHINE` の上書きで「弾かれる／上書きで通る」の対を示す）:
+```bash
+# 弾かれる：わざと食い違う期待値（RV32 相当）を与える
+cmake -G Ninja -B /tmp/fmp3-rv32-mismatch -S . -DFMP3_TARGET=polarfire_soc_kit_gcc \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-riscv64.cmake \
+    -DFMP3_EXPECTED_TOOLCHAIN_MACHINE=riscv32
+echo "exit=$?"
+
+# 上書きで通る：実コンパイラの -dumpmachine と一致する期待値を与える
+cmake -G Ninja -B /tmp/fmp3-rv32-override-ok -S . -DFMP3_TARGET=polarfire_soc_kit_gcc \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-riscv64.cmake \
+    -DFMP3_EXPECTED_TOOLCHAIN_MACHINE=riscv64-unknown-elf
+echo "exit=$?"
+```
+Expected: 前者は `does not match the expected pattern 'riscv32'` を含む FATAL_ERROR，`exit=1`。
+後者は `Configuring done`，`exit=0`。**`-D` による上書きが実際に効いている**ことの確認
+（効いていなければ `toolchain-riscv64.cmake` の既定 `riscv64` が両方とも通してしまう）。
+これにより，将来 `riscv32-esp-elf-gcc` で configure する際，対応するツールチェーンファイルが
+`FMP3_EXPECTED_TOOLCHAIN_MACHINE` に `riscv32` 系パターンを宣言しさえすれば，本検査が
+RV32 を誤って弾かないことが示される。
+
+**(d) 期待値未定義時にスキップされることの確認**（将来 ARM 系ツールチェーンファイルが
+宣言を忘れるケースを，宣言を持たない使い捨てツールチェーンファイルで模す）:
+```bash
+cmake -G Ninja -B /tmp/fmp3-skip-test -S . -DFMP3_TARGET=polarfire_soc_kit_gcc \
+    -DCMAKE_TOOLCHAIN_FILE=<FMP3_EXPECTED_TOOLCHAIN_MACHINE を宣言しない使い捨てツールチェーンファイル>
+```
+Expected: `-- fmp3_core: toolchain identity check skipped -- CMAKE_TOOLCHAIN_FILE='...' does
+not declare FMP3_EXPECTED_TOOLCHAIN_MACHINE ...` が STATUS で出た上で `Configuring done`，
+`exit=0`。**黙って素通りせず，検査を行わなかったことが分かる**ことを確認する。
 
 - [ ] **Step 14: コミット**
 
