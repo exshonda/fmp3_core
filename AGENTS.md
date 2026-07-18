@@ -11,7 +11,7 @@ FMP3 の派生版（CMake 一本化 + Python cfg、TECS レス）。上流 prist
 .                             # pristine と派生ファイルが root 名前空間を共有
 ├── kernel/ arch/ target/ …   # ← 上流 pristine（fmp3_archive 由来。in-place 編集可）
 ├── cmake/  CMakeLists.txt  CMakePresets.json   # ← 派生: CMake 化
-├── configurator/            # ← 派生: Python cfg（pristine の cfg/ は使わない）
+├── cfg_py/                  # ← 派生: Python cfg（pristine の cfg/ は使わない）
 ├── tools/import_upstream.sh # ← 上流取り込み（vendor ブランチへ）
 ├── tools/upstream_infra_exclude.txt   # archive 側 infra の除外リスト
 ├── tools/upstream_targets.txt         # 取り込む target/ の allowlist（無ければ全部入り）
@@ -28,9 +28,9 @@ FMP3 の派生版（CMake 一本化 + Python cfg、TECS レス）。上流 prist
 
 ## 2. 絶対ルール（HARD RULES）
 
-1. **`upstream` ブランチは pristine のみ**。CMake・configurator・tools 等の派生ファイルを絶対に載せない。更新は `tools/import_upstream.sh` 経由のみ。
+1. **`upstream` ブランチは pristine のみ**。CMake・cfg_py・tools 等の派生ファイルを絶対に載せない。更新は `tools/import_upstream.sh` 経由のみ。
 2. **pristine への改変は必ず `DIVERGENCE_MAP.md` に記録**（1 ファイル 1 行以上：対象・種別・理由・上流報告有無）。
-3. **pristine の `cfg/` は使わない**。cfg 相当は `configurator/`（Python）で提供し、CMake から呼ぶ。`cfg/` は残すが参照しない（DIVERGENCE_MAP に「cfg を Python 実装へ置換」と記載）。
+3. **pristine の `cfg/` は使わない**。cfg 相当は `cfg_py/`（Python）で提供し、CMake から呼ぶ。`cfg/` は残すが参照しない（DIVERGENCE_MAP に「cfg を Python 実装へ置換」と記載）。
 4. **pin を必ず記録**：`UPSTREAM_VERSION`（3.M.N）＋ `UPSTREAM_PRISTINE.txt`（archive の commit SHA）。
 5. 上流追従は**マージで行う**（`git merge upstream`）。pristine をコピペで貼り直して履歴を壊さない。
 6. **取り込む target は `tools/upstream_targets.txt` で決める**。ここに無い target は `upstream` に入らない。
@@ -44,7 +44,7 @@ FMP3 の派生版（CMake 一本化 + Python cfg、TECS レス）。上流 prist
 
 ```bash
 git init -b main
-# 1) 派生 scaffold を最初のコミットに（この AGENTS.md / CMake / configurator / tools 等）
+# 1) 派生 scaffold を最初のコミットに（この AGENTS.md / CMake / cfg_py / tools 等）
 git add -A
 git commit -m "Bootstrap fmp3_core scaffold (CMake + Python cfg)"
 # 2) pristine を vendor ブランチ upstream(orphan) へ取り込む（archive の pin を指定）

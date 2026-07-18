@@ -10,4 +10,4 @@ TOPPERS/FMP3  をベースに **CMake 一本化 + Python cfg + TECS レス**へ�
 ## 構成
 
 - `upstream` ブランチ … pristine のみ（vendor ブランチ）
-- `main` ブランチ … `upstream` をマージ＋派生（CMake / `configurator/` の Python cfg）
+- `main` ブランチ … `upstream` をマージ＋派生（CMake / `cfg_py/` の Python cfg）

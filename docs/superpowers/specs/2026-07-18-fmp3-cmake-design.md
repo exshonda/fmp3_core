@@ -22,7 +22,7 @@ v2 → v3 は **esp32_p4 を第1波に追加**したことによる（§11）。
 - FMP3 3.4.0 pristine を vendor ブランチ `upstream` 経由で取り込み済み（archive commit `f3d29a4`）。
 - target は 6 個: `m5stamp_esp32p4_gcc` `musca_b1_gcc` `rp2350_pico2_gcc`
   `polarfire_soc_kit_gcc` `kria_arm64_gcc` `kria_r5_gcc`。
-- `CMakeLists.txt` は 6 行の雛形、`configurator/` は README のみ。ビルドは通らない。
+- `CMakeLists.txt` は 6 行の雛形、`cfg_py/` は README のみ。ビルドは通らない。
 
 ## 1. 参考実装（実測）
 
@@ -105,7 +105,7 @@ fmp3_pico_sdk に流用元は無く（arch は `arm_m_gcc` のみ）、asp3_core
 | 第1波の対象 | `polarfire_soc_kit_gcc` → `m5stamp_esp32p4_gcc` の順 | 性質の異なる2つで層の切り方を検証する。順序は、外部 SDK 依存の無い polarfire で cfg パイプラインを確立してから、esp32p4 の IDF 統合を載せる（cfg 移植のバグと IDF 統合のバグを同時に出さないため） |
 | 最初のターゲット | `polarfire_soc_kit_gcc` | QEMU 検証可能。`TNUM_PRCID` 既定 4 で FMP3 固有部分を最初から踏める。TTSP3 実績あり |
 | ライブラリモード | **最初から設計に入れる**（後付けしない） | esp32p4 が `libfmp3.a` を要求するため（§3.1）。後から入れると層の切り方をやり直すことになる |
-| cfg エンジン | asp3_core 1.7.1 を `configurator/` へ | §1.3。オラクルと版が揃う |
+| cfg エンジン | asp3_core 1.7.1 を `cfg_py/` へ | §1.3。オラクルと版が揃う |
 | テンプレート配置 | pristine 並置 | 参考 repo 同型。`IncludeTrb` の探索パスが揃う |
 | 検証 | Ruby cfg との差分等価性検査（§7.1） | golden 不要、positive control 可能 |
 | 進め方 | Ruby cfg で骨格を先に通す → Python へ | 切り分け可能性。Ruby がオラクルになる |
@@ -228,7 +228,7 @@ set(FMP3_KERNEL_CFG_DIR ${KERNEL_CFG_DIR} PARENT_SCOPE)
 ```
 CMakeLists.txt  fmp3_core.cmake                          ← 派生（新規）
 cmake/presets-base.json  cmake/toolchain-riscv64.cmake
-configurator/ cfg.py pass1.py pass2.py gen_file.py srecord.py   ← 派生（asp3_core 1.7.1 ベース）
+cfg_py/ cfg.py pass1.py pass2.py gen_file.py srecord.py   ← 派生（asp3_core 1.7.1 ベース）
 tools/cfg_equivalence.sh                                 ← 派生（§7.1 のオラクル比較。CMake 外）
 kernel/ kernel.py task.py … spin_lock.py                 ← 派生（pristine 並置・15個）
 arch/riscv_gcc/
@@ -339,7 +339,7 @@ pass2 は各実装が自前形式の中間ファイル（Ruby は PStore、Pytho
 
 **規約との整合**: AGENTS.md §2-3 / §5 は「pristine の `cfg/` を CMake から参照しない」と定める。
 したがって **Ruby オラクルは CMake に一切入れず、`tools/cfg_equivalence.sh`（CMake 外のスクリプト）に置く**。
-製品ビルドの CMake は `configurator/` の Python のみを呼ぶ。
+製品ビルドの CMake は `cfg_py/` の Python のみを呼ぶ。
 
 ### 7.2 エラー検出経路の回帰スイート（★v1 では優先度低と誤判断）
 
@@ -412,7 +412,7 @@ cfg 移植のバグと IDF 統合のバグを同時に出さないため（§2�
    — `FMP3_CFG1_OUT_LINK_OPTIONS`（§5.1）と `FMP3_PRC_NUM`（§3）を含める
 3. **Ruby cfg 経路**（CMake 外のスクリプトから駆動）で `sample1` が QEMU で動く
    → CMake パイプラインの検証完了。§7.3.1 のコマンドで判定
-4. `configurator/` へ asp3_core 1.7.1 エンジンを移植
+4. `cfg_py/` へ asp3_core 1.7.1 エンジンを移植
 5. テンプレート移植（polarfire 経路）:
    - 5a. `kernel/` 15 個（fmp3_pico_sdk 流用 12 ＋ 3.4.0 差分 3 = 約 206 行の編集）
    - 5b. ★**`arch/riscv_gcc/` 5 個・449 行の新規移植**（前例ゼロ・最リスク）

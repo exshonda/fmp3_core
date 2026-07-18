@@ -18,7 +18,7 @@
   `m5stamp_esp32p4_gcc` `musca_b1_gcc` `rp2350_pico2_gcc` `polarfire_soc_kit_gcc`
   `kria_arm64_gcc` `kria_r5_gcc`。他は意図的に落としてある（DIVERGENCE_MAP.md 参照）。
 - **`CMakeLists.txt` は雛形のままで、ビルドは通らない**（`add_subdirectory` 無し）。
-  `configurator/` も README のみで実装が無い。したがって「ビルドして確認」はまだ成立しない。
+  `cfg_py/` も README のみで実装が無い。したがって「ビルドして確認」はまだ成立しない。
 
 ```bash
 # 上流 archive の位置（このリポジトリから見て ../fmp3_archive）
@@ -31,7 +31,7 @@ tools/import_upstream.sh ../fmp3_archive <ref>
 
 **pristine と派生ファイルが root 名前空間を共有する**のがこの構成の肝であり、事故の元でもある。
 `kernel/` `arch/` `target/` `include/` `syssvc/` `library/` `cfg/` は上流の持ち物、
-`cmake/` `configurator/` `tools/` `CMakeLists.txt` `CMakePresets.json` と各種 .md は派生の持ち物。
+`cmake/` `cfg_py/` `tools/` `CMakeLists.txt` `CMakePresets.json` と各種 .md は派生の持ち物。
 **ファイルがどちらの持ち物かで、載せてよいブランチが決まる。**
 
 - `upstream` … pristine のみの vendor ブランチ。`tools/import_upstream.sh` だけが更新する。派生ファイルを載せない。
@@ -48,7 +48,7 @@ pristine を編集してよい（in-place 編集可）が、**編集したら必
 
 1. **`upstream` ブランチに派生ファイルを載せない。** 更新は `import_upstream.sh` 経由のみ、手で触らない。
 2. **pristine への改変は必ず `DIVERGENCE_MAP.md` に記録**（対象・種別・理由・上流報告有無）。
-3. **pristine の `cfg/` は使わない。** cfg 相当は `configurator/`（Python）が提供し、CMake から呼ぶ。
+3. **pristine の `cfg/` は使わない。** cfg 相当は `cfg_py/`（Python）が提供し、CMake から呼ぶ。
    `cfg/` はツリーに残るが**参照しない**。
 4. **pin を必ず記録**：`UPSTREAM_VERSION`（3.M.N）＋ `UPSTREAM_PRISTINE.txt`（archive の commit SHA）。
 
