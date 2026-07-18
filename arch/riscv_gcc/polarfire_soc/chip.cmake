@@ -30,8 +30,21 @@ set(COREDIR ${ARCHDIR}/common)
 #  ABI は lp64d のまま変わらず，圧縮命令(C)も維持されるのでコードサイズが
 #  小さくなる．
 #
-set(FMP3_RISCV_MARCH "rv64imafdc" CACHE STRING
-    "RISC-V ISA string passed to -march (same ISA as upstream rv64gc; this spelling resolves to picolibc's default multilib)")
+#  ★rv64gc は ISA 文字列の "g" シェルタンド展開により暗黙に
+#    zicsr・zifencei を含む（"g" = imafd_zicsr_zifencei）が，明示的に
+#    imafdc と綴ると gcc ドライバは zicsr だけを自動追加し（実測: -v で
+#    -march=rv64imafdc_zicsr と表示される），zifencei は追加しない．
+#  Task 7 で Microchip SDK（mss_entry.S / system_startup.c）を初めて
+#  ビルドしたところ，両ファイルとも fence.i 命令を使っており，
+#    Error: unrecognized opcode `fence.i', extension `zifencei' required
+#  でアセンブルに失敗した（カーネル／arch 側の .S は fence.i を使わない
+#  ため Task 2〜6 では顕在化しなかった）．zifencei を明示して rv64gc と
+#  同じ拡張集合に戻す．multilib の解決先は zicsr_zifencei を足しても
+#  変わらない（実測: -print-file-name=crt0.o が rv64imafdc と同じ
+#  ディレクトリを指す）．
+#
+set(FMP3_RISCV_MARCH "rv64imafdc_zicsr_zifencei" CACHE STRING
+    "RISC-V ISA string passed to -march (same ISA as upstream rv64gc, including zicsr/zifencei; this spelling resolves to picolibc's default multilib)")
 
 #
 #  C ライブラリの specs

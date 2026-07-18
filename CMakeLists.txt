@@ -98,6 +98,25 @@ if(NOT FMP3_PRC_NUM STREQUAL "")
     list(APPEND FMP3_COMPILE_DEFS TNUM_PRCID=${FMP3_PRC_NUM})
 endif()
 
+#
+#  共通コンパイルオプション（target/chip 非依存）
+#
+#  上流 sample/Makefile:182-188 の既定値に相当する（OMIT_WARNING_ALL /
+#  OMIT_OPTIMIZATION いずれも未定義のときの既定）：
+#    COPTS := -g @(COPTS) $(COPTS)
+#    COPTS := -Wall $(COPTS)        # ifndef OMIT_WARNING_ALL
+#    COPTS := -O2 $(COPTS)          # ifndef OMIT_OPTIMIZATION
+#  target.cmake / chip.cmake はこれを積まない（arch/target 非依存の既定値
+#  なので，Makefile と同じ層＝ここに置く）．
+#
+#  ★-O2 を省略すると単に「遅い」では済まない．PolarFire SoC Kit QEMU の
+#    既定リンカスクリプト（lim-debug/mpfs-lim.ld）は l2lim を 256KiB しか
+#    割り当てておらず，-O0（gcc 既定）でビルドした fmp は実測で
+#    ".stack section will not fit in region l2lim"（16KiB オーバー）で
+#    リンクに失敗する．-O2 で通常サイズに戻ると収まる．
+#
+list(APPEND FMP3_COMPILE_OPTIONS -g -Wall -O2)
+
 message(STATUS "fmp3_core: FMP3_ROOT_DIR   = ${FMP3_ROOT_DIR}")
 message(STATUS "fmp3_core: FMP3_TARGET     = ${FMP3_TARGET}")
 message(STATUS "fmp3_core: FMP3_TARGET_DIR = ${FMP3_TARGET_DIR}")
@@ -470,3 +489,70 @@ target_compile_definitions(fmp3
     PUBLIC  ${FMP3_COMPILE_DEFS}
 )
 target_compile_options(fmp3 PUBLIC ${FMP3_COMPILE_OPTIONS})
+
+#
+#  cfg パス3：構成チェック（最終 ELF に対する POST_BUILD）
+#
+#  上流 sample/Makefile:483-487 に相当．
+#  ライブラリ専用モードでは最終 ELF が無いため呼ばない．引数一式は
+#  親スコープへ export し，外部 SDK 側が自前の ELF に対して呼べるようにする．
+#
+set(PASS3_ARGS ${CFG_COMMAND} --pass 3 --kernel fmp -O
+    ${CFG_INCLUDE_DIRS} ${CFG_CHECK_TRB_FILES})
+
+function(fmp3_cfg_check TARGET)
+    add_custom_command(TARGET ${TARGET} POST_BUILD
+        WORKING_DIRECTORY ${CFG_GEN_DIR}
+        COMMAND ${CMAKE_COMMAND}
+                -DNM=${CMAKE_NM}
+                -DELF=$<TARGET_FILE:${TARGET}>
+                -DOUT=${CFG_GEN_DIR}/${TARGET}.syms
+                -P ${FMP3_ROOT_DIR}/cmake/nm_to_file.cmake
+        COMMAND ${CMAKE_OBJCOPY} -O srec -S $<TARGET_FILE:${TARGET}>
+                ${CFG_GEN_DIR}/${TARGET}.srec
+        COMMAND ${PASS3_ARGS}
+                --rom-symbol ${CFG_GEN_DIR}/${TARGET}.syms
+                --rom-image  ${CFG_GEN_DIR}/${TARGET}.srec
+        COMMENT "Running cfg pass 3 to check configuration"
+    )
+endfunction()
+
+if(FMP3_LIBRARY_ONLY)
+    #  外部 SDK 側が最終 ELF を作るため，pass3 の材料を渡す
+    set(FMP3_PASS3_ARGS   ${PASS3_ARGS}  PARENT_SCOPE)
+    set(FMP3_CFG_GEN_DIR  ${CFG_GEN_DIR} PARENT_SCOPE)
+endif()
+
+if(NOT FMP3_LIBRARY_ONLY)
+
+#
+#  アプリケーション実行ファイル（fmp）
+#
+#  上流 sample/Makefile:453-456 の $(OBJFILE) に相当．
+#  START_OBJS（start.S）はライブラリ外で先頭にリンクする．
+#  Microchip SDK のソースは上流が SYSSVC_COBJS/SYSSVC_ASMOBJS として
+#  最終リンクに加えているのと同じ扱いにする．
+#
+add_executable(fmp
+    ${FMP3_START_FILES}
+    ${FMP3_APPLDIR}/${FMP3_APPLNAME}.c
+    ${FMP3_SDK_C_FILES}
+    ${FMP3_SDK_ASM_FILES}
+)
+fmp3_add_syssvc(fmp)
+
+target_include_directories(fmp
+    PRIVATE ${FMP3_ROOT_DIR}/kernel
+)
+target_link_libraries(fmp PRIVATE fmp3 ${FMP3_LINK_LIBS})
+target_link_options(fmp PRIVATE ${FMP3_LINK_OPTIONS})
+
+#  リンカスクリプトを変更したら再リンクされるようにする
+#  （-T / -Wl,-T は自動では依存にならない）
+if(DEFINED FMP3_LDSCRIPT)
+    set_property(TARGET fmp APPEND PROPERTY LINK_DEPENDS ${FMP3_LDSCRIPT})
+endif()
+
+fmp3_cfg_check(fmp)
+
+endif()  # NOT FMP3_LIBRARY_ONLY
