@@ -6,7 +6,7 @@
 
 **Architecture:** asp3_core と同型の層構造（`CMakePresets.json` → `target/<t>/presets.json` → `cmake/presets-base.json`、`CMakeLists.txt` → `fmp3_core.cmake` → `target.cmake` → `chip.cmake` → `arch.cmake`）を敷き、cfg の3パス（pass1 → `cfg1_out` リンク → `nm`/`objcopy` → pass2×2 → pass3）を CMake に載せる。**CMake が呼ぶ cfg は常に `cfg_py/cfg.py` のみ**とする。本計画（計画A）の間、`cfg_py/cfg.py` は pristine の `cfg/cfg.rb` へそのまま委譲する薄いシムであり、これにより CMake パイプラインの正しさを、テンプレート Python 移植のバグと**切り離して**検証できる。
 
-**Tech Stack:** CMake 3.20+ / Ninja / `riscv64-unknown-elf-gcc` 13.2.0 / picolibc 1.8.6-2 / ruby 3.2.3 / `qemu-system-riscv64` 8.2.2
+**Tech Stack:** CMake 3.23+ / Ninja / `riscv64-unknown-elf-gcc` 13.2.0 / picolibc 1.8.6-2 / ruby 3.2.3 / `qemu-system-riscv64` 8.2.2
 
 ## Global Constraints
 
@@ -44,6 +44,7 @@
 
 **Files:**
 - Create: `cmake/toolchain-riscv64.cmake`
+- Create: `cmake/toolchain_check.cmake`
 - Create: `cmake/presets-base.json`
 - Create: `CMakePresets.json`
 - Create: `target/polarfire_soc_kit_gcc/presets.json`
@@ -58,6 +59,9 @@
   - `FMP3_TARGET_DIR`（文字列、既定 `${FMP3_ROOT_DIR}/target/${FMP3_TARGET}`）
   - `fmp3_add_syssvc(TARGET)`（関数。非TECS版システムサービスと library の `.c` を `TARGET` に追加する）
   - `FMP3_SYSSVC_TARGET_C_FILES`（リスト。`fmp3_add_syssvc` が読む。chip.cmake が積む）
+  - ツールチェーン同定の検査（`cmake/toolchain_check.cmake`）：`${CMAKE_C_COMPILER} -dumpmachine`
+    の出力に `riscv64` を含まない場合，configure 時に FATAL_ERROR で止める（ホスト gcc への
+    フォールバックを検出して事故を防ぐ）。`fmp3_core.cmake` の先頭で `project()` 後に include する。
 
 - [ ] **Step 1: 環境の前提を実測で確認する（これが崩れると以降が全部崩れる）**
 
@@ -138,6 +142,77 @@ set(CMAKE_OBJDUMP      ${RISCV64_TOOLCHAIN_PREFIX}objdump CACHE FILEPATH "objdum
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 ```
 
+- [ ] **Step 3b: ツールチェーン同定の検査を書く**
+
+兄弟プロジェクト `asp3_esp_idf` で実測された事故（`-DRISCV64_TOOLCHAIN_PREFIX` の渡し忘れが
+「ビルドは通るのに間違ったコンパイラ」を生み，build/ 配下 320 構成のうち 164 構成が
+Ubuntu 汎用 GCC でビルドされていた。`asp3/target/esp32c6_espidf/target.cmake:18-33` に記録）
+を防ぐ。`toolchain-riscv64.cmake` は `CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY` を
+設定しているため，ホストの gcc でも `try_compile` が通ってしまい，同じ穴がある。
+
+まず `-dumpmachine` の出力形式を実測する:
+```bash
+riscv64-unknown-elf-gcc -dumpmachine
+gcc -dumpmachine
+```
+Expected:
+```
+riscv64-unknown-elf
+x86_64-linux-gnu
+```
+→ クロスは `riscv64` を含み，ホストは含まない。この差で判定する。
+
+`cmake/toolchain_check.cmake`:
+```cmake
+#
+#		ツールチェーン同定の検査
+#
+#  cmake/toolchain-riscv64.cmake は CMAKE_TRY_COMPILE_TARGET_TYPE を
+#  STATIC_LIBRARY にしている（ベアメタルは完全なリンクができないため）．
+#  この設定のせいで，-DCMAKE_TOOLCHAIN_FILE を渡し忘れてもホストの gcc で
+#  try_compile が通ってしまい，「ビルドは通るのに間違ったコンパイラ」という
+#  事故が起きる（実測：兄弟プロジェクト asp3_esp_idf/asp3/target/esp32c6_espidf/
+#  target.cmake:18-33，build/ 配下 320 構成のうち 164 構成がホストの
+#  Ubuntu 汎用 GCC でビルドされていた）．
+#
+#  configure 時に `${CMAKE_C_COMPILER} -dumpmachine` の出力を見て，
+#  RISC-V ベアメタル向けでなければ即座に FATAL_ERROR で止める。
+#  コンパイラは project() が実行されるまで確定しないため，本ファイルは
+#  project() の後（fmp3_core.cmake の先頭）から include すること．
+#
+execute_process(
+    COMMAND ${CMAKE_C_COMPILER} -dumpmachine
+    OUTPUT_VARIABLE FMP3_C_COMPILER_MACHINE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE FMP3_DUMPMACHINE_RESULT
+)
+
+if(NOT FMP3_DUMPMACHINE_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "Failed to run '${CMAKE_C_COMPILER} -dumpmachine' (exit ${FMP3_DUMPMACHINE_RESULT}). "
+        "CMAKE_C_COMPILER='${CMAKE_C_COMPILER}' does not look like a working compiler. "
+        "Did you forget to pass a toolchain file "
+        "(-DCMAKE_TOOLCHAIN_FILE=${FMP3_ROOT_DIR}/cmake/toolchain-riscv64.cmake), "
+        "or use a CMake preset that sets it (e.g. --preset polarfire_soc_kit-qemu)?")
+endif()
+
+if(NOT FMP3_C_COMPILER_MACHINE MATCHES "riscv64")
+    message(FATAL_ERROR
+        "CMAKE_C_COMPILER ('${CMAKE_C_COMPILER}') reports target machine "
+        "'${FMP3_C_COMPILER_MACHINE}' (via -dumpmachine), which is not a riscv64 "
+        "toolchain. fmp3_core targets RISC-V bare metal only; configuring with a "
+        "host compiler silently produces a binary for the HOST, not the target "
+        "firmware, because CMAKE_TRY_COMPILE_TARGET_TYPE is STATIC_LIBRARY here and "
+        "try_compile does not fail against a host gcc "
+        "(this exact mistake caused 164/320 misbuilt configurations in the sibling "
+        "asp3_esp_idf project: asp3/target/esp32c6_espidf/target.cmake:18-33). "
+        "Fix: pass -DCMAKE_TOOLCHAIN_FILE=${FMP3_ROOT_DIR}/cmake/toolchain-riscv64.cmake "
+        "(or use a CMake preset that sets it, e.g. --preset polarfire_soc_kit-qemu), and "
+        "check that RISCV64_TOOLCHAIN_PREFIX (default 'riscv64-unknown-elf-') matches an "
+        "installed RISC-V cross toolchain.")
+endif()
+```
+
 - [ ] **Step 4: presets のベースを書く**
 
 `cmake/presets-base.json`:
@@ -209,7 +284,7 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
   "version": 4,
   "cmakeMinimumRequired": {
     "major": 3,
-    "minor": 20,
+    "minor": 23,
     "patch": 0
   },
   "include": [
@@ -236,6 +311,13 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 #    -DFMP3_TARGET_DIR=<絶対パス> で供給する．
 #
 set(FMP3_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR})
+
+#
+#  コンパイラが本当に RISC-V ベアメタル向けかを検査する（project() の後で
+#  ないと CMAKE_C_COMPILER が確定しないため，project() の後で include される
+#  本ファイルの先頭で行う）．
+#
+include(${FMP3_ROOT_DIR}/cmake/toolchain_check.cmake)
 
 if(NOT DEFINED FMP3_TARGET)
     message(FATAL_ERROR
@@ -306,7 +388,7 @@ list(APPEND FMP3_INCLUDE_DIRS ${TARGETDIR})
 #    cmake --build build/polarfire_soc_kit-qemu
 #    cmake --build build/polarfire_soc_kit-qemu --target run
 #
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.23)
 
 project(fmp3_core C ASM)
 
@@ -353,15 +435,51 @@ Expected:
 
 - [ ] **Step 11: 未対応ターゲットで正しく落ちることを確認する（エラー経路の確認）**
 
-Run: `cmake -G Ninja -B /tmp/fmp3-badtarget -S . -DFMP3_TARGET=musca_b1_gcc -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-riscv64.cmake 2>&1 | grep -A2 FATAL`
-Expected: `target/musca_b1_gcc/target.cmake not found.` を含む FATAL_ERROR
-（`musca_b1_gcc` はまだ `target.cmake` を持たないため。これは正しい振る舞い）
+Run: `cmake -G Ninja -B /tmp/fmp3-badtarget -S . -DFMP3_TARGET=musca_b1_gcc -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-riscv64.cmake 2>&1 | grep -A3 "CMake Error"`
+Expected: `target/musca_b1_gcc/target.cmake not found.` を含む `CMake Error at fmp3_core.cmake (message):`
+（`message(FATAL_ERROR ...)` の出力に文字列 "FATAL" 自体は含まれないため `grep FATAL` ではなく
+`grep "CMake Error"` で拾う。`musca_b1_gcc` はまだ `target.cmake` を持たないため FAIL は正しい振る舞い）
+exit code は 1 であること（`echo $?` あるいは `${PIPESTATUS[0]}` で確認）。
 
-- [ ] **Step 12: コミット**
+- [ ] **Step 12: `FMP3_TARGET` 未指定で正しく落ちることを確認する（未検証だった分岐のテスト）**
+
+`fmp3_core.cmake` の `FMP3_TARGET is not defined` FATAL_ERROR 分岐はどの Step でも踏まれて
+いなかった（Step 10/11 はどちらも `FMP3_TARGET` を指定している）。これを検証する。
+
+Run:
+```bash
+cmake -G Ninja -B /tmp/fmp3-notarget -S . \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-riscv64.cmake
+echo "exit=$?"
+```
+Expected: `CMake Error at fmp3_core.cmake (message):` に続けて
+`FMP3_TARGET is not defined. Use a preset (e.g. --preset polarfire_soc_kit-qemu) or -DFMP3_TARGET=<target>.`
+を含む FATAL_ERROR、`exit=1`。
+
+- [ ] **Step 13: ツールチェーン同定の検査を positive/negative control で確認する**
+
+positive control（正しいツールチェーンでは通る）:
+```bash
+cmake --preset polarfire_soc_kit-qemu 2>&1 | grep -E 'fmp3_core:|Configuring done'
+```
+Expected: Step 10 と同じく `Configuring done` まで到達する（`toolchain_check.cmake` が
+`riscv64-unknown-elf-gcc` を正しく `riscv64` と認識し，通過することの確認）。
+
+negative control（ツールチェーンファイルを渡し忘れると，configure 時にこの検査で止まる）:
+```bash
+cmake -G Ninja -B /tmp/fmp3-hostgcc -S . -DFMP3_TARGET=polarfire_soc_kit_gcc
+echo "exit=$?"
+```
+Expected: `CMake Error at cmake/toolchain_check.cmake (message):` に続けて
+`CMAKE_C_COMPILER ('...') reports target machine 'x86_64-linux-gnu' ... is not a riscv64 toolchain`
+を含む FATAL_ERROR、`exit=1`。**ビルド途中の分かりにくいエラーではなく，configure 時点で
+止まること**を確認する（`ninja` や `make` まで進んでからのリンクエラー等ではない）。
+
+- [ ] **Step 14: コミット**
 
 ```bash
-git add cmake/toolchain-riscv64.cmake cmake/presets-base.json CMakePresets.json \
-        CMakeLists.txt fmp3_core.cmake \
+git add cmake/toolchain-riscv64.cmake cmake/toolchain_check.cmake cmake/presets-base.json \
+        CMakePresets.json CMakeLists.txt fmp3_core.cmake \
         target/polarfire_soc_kit_gcc/presets.json target/polarfire_soc_kit_gcc/target.cmake
 git commit -m "build: CMake 骨格（ツールチェーン・presets・エントリ）を追加
 
@@ -1049,7 +1167,7 @@ endforeach()
 #    毎ビルド pass1 が再実行される．上流 Makefile も timestamp 方式である．
 #
 #  ★DEPFILE で .cfg が #include するヘッダを追跡する．cfg が -M で書く
-#    depfile のターゲットは裸の "cfg1_out.timestamp" だが，CMake 3.20+ の
+#    depfile のターゲットは裸の "cfg1_out.timestamp" だが，CMake 3.23+ の
 #    Ninja ジェネレータが変換するため OUTPUT と一致しなくてよい（Task 5 の
 #    positive control で実証する）．
 #

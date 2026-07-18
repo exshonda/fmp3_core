@@ -13,6 +13,13 @@
 #
 set(FMP3_ROOT_DIR ${CMAKE_CURRENT_LIST_DIR})
 
+#
+#  コンパイラが本当に RISC-V ベアメタル向けかを検査する（project() の後で
+#  ないと CMAKE_C_COMPILER が確定しないため，project() の後で include される
+#  本ファイルの先頭で行う）．
+#
+include(${FMP3_ROOT_DIR}/cmake/toolchain_check.cmake)
+
 if(NOT DEFINED FMP3_TARGET)
     message(FATAL_ERROR
         "FMP3_TARGET is not defined. "
