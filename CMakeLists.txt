@@ -555,4 +555,16 @@ endif()
 
 fmp3_cfg_check(fmp)
 
+#
+#  実行ターゲット（target.cmake が FMP3_RUN_COMMAND を定義した場合）
+#
+if(DEFINED FMP3_RUN_COMMAND)
+    add_custom_target(run
+        COMMAND ${FMP3_RUN_COMMAND}
+        DEPENDS fmp
+        USES_TERMINAL
+        COMMENT "Running on QEMU (Ctrl-A X to quit)"
+    )
+endif()
+
 endif()  # NOT FMP3_LIBRARY_ONLY

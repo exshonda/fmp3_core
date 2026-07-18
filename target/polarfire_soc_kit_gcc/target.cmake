@@ -156,4 +156,30 @@ if(POLARFIRE_QEMU)
     #  TOPPERS_magic_number が除去される．これを抑止する．
     #
     list(APPEND FMP3_CFG1_OUT_LINK_OPTIONS -Wl,--no-gc-sections)
+
+    #
+    #  QEMU による実行（cmake --build <dir> --target run）
+    #
+    #  ★asp3_core の polarfire の RUN_COMMAND は流用できない．
+    #    icicle-kit マシンは既定で envm にリセットして HSS の起動を待つため，
+    #    全ハートのリセット PC をカーネルのエントリ（_start）に向ける必要が
+    #    ある．そのため5ハートすべてに -device loader を与え，-bios none で
+    #    既定の OpenSBI を載せない．
+    #    出典: target/polarfire_soc_kit_gcc/target_user.md:177-186
+    #
+    #    E51（hart0）は MPFS HAL により待機し，U54（hart1〜4＝PRC1〜4）で
+    #    FMP3 が動作する．
+    #
+    set(QEMU_SYSTEM_RISCV64 qemu-system-riscv64
+        CACHE STRING "Path to qemu-system-riscv64")
+    set(FMP3_RUN_COMMAND
+        ${QEMU_SYSTEM_RISCV64} -M microchip-icicle-kit -smp 5 -m 2G -nographic
+        -serial mon:stdio -bios none
+        -kernel $<TARGET_FILE:fmp>
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=0
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=1
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=2
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=3
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=4
+    )
 endif()
