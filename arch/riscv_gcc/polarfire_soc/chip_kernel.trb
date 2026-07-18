@@ -1,0 +1,36 @@
+# -*- coding: utf-8 -*-
+# 
+#    パス2の生成スクリプトのチップ依存部（PolarFire SoC 用）
+# 
+
+#
+#  使用できる割込み番号とそれに対応する割込みハンドラ番号
+#
+$INTNO_VALID = {}
+$INHNO_VALID = {}
+$plic_intno_list = [ *(0..182) ]
+1.upto($TNUM_PRCID) do |prcid|
+  $INTNO_VALID[prcid] = []
+  $INHNO_VALID[prcid] = []
+  $plic_intno_list.each do |intno|
+    $INTNO_VALID[prcid].push(intno)
+    $INHNO_VALID[prcid].push((prcid << 16) | intno)
+  end
+end
+
+#
+#  プロセッサIDからPLICのコンテキストINDEXへの変換
+#
+def pid2cidx(pid) 
+  return ((pid - 1) * 2) + 1
+end
+
+# 
+#  生成スクリプトのコア依存部
+# 
+IncludeTrb("core_kernel.trb")
+
+#
+#  生成スクリプトのPLIC依存部
+#
+IncludeTrb("plic_kernel.trb")

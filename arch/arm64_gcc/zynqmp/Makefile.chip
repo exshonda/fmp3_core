@@ -1,0 +1,49 @@
+#
+#		Makefile のチップ依存部(ZynqMP用)
+#
+
+#
+#  チップ依存部ディレクトリ名の定義
+#
+CHIPDIR = $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)
+
+#
+#  コンパイルオプション
+#
+COPTS := $(COPTS) -mcpu=cortex-a53
+LDFLAGS := $(LDFLAGS) -mcpu=cortex-a53
+CDEFS := $(CDEFS) -DTOPPERS_CORTEX_A53
+
+INCLUDES := $(INCLUDES) -I$(CHIPDIR)
+LDFLAGS := $(LDFLAGS) -N
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(CHIPDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) chip_kernel_impl.o
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS)
+
+#
+#  システムサービスに関する定義
+#
+SYSSVC_DIRS := $(SYSSVC_DIRS) $(CHIPDIR)
+
+#
+#  スタートアップモジュールに関する定義
+#
+#  START_OBJSをstart.oに設定し，LDFLAGSに-nostdlibを追加する．
+#
+START_OBJS := start.o $(START_OBJS)
+START_OBJS := $(addprefix $(OBJDIR)/, $(START_OBJS))
+
+$(START_OBJS): $(OBJDIR)/%.o: %.S
+	$(CC) -c -o $@ -MD -MP -MF $(DEPDIR)/$*.d $(CFLAGS) $(KERNEL_CFLAGS) $<
+
+LDFLAGS := -nostdlib $(LDFLAGS)
+
+#
+#  コア依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/common/Makefile.core
+

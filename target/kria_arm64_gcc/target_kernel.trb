@@ -1,0 +1,11 @@
+# -*- coding: utf-8 -*-
+#
+#		パス2の生成スクリプトのターゲット依存部（KRIA Cortex-A53(AArch64)用）
+#
+#  $Id: target_kernel.trb 345 2023-04-20 12:58:48Z ertl-honda $
+#
+
+#
+#  生成スクリプトのチップ依存部
+#
+IncludeTrb("chip_kernel.trb")

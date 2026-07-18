@@ -1,0 +1,266 @@
+#
+#		Makefile のターゲット依存部（KRIA-ARM64用）
+#
+
+#
+#  System monitor設定
+#    ATF_S     :   ATF(SafeG64) Secure EL1動作
+#    ATF_NS    :   ATF Non-Secure EL1動作
+#    指定なし  :   ATF Secure EL1動作
+#
+#SYSMON = ATF_S
+
+#
+#  システム名，チップ名，コア名，開発環境名の定義
+#
+SYS = kria_arm64
+CHIP = zynqmp
+CORE = arm64
+TOOL = gcc
+
+#
+#  対象 Kria ボードの選択（バナー表示名のみに影響．PS は全 Kria で同一）
+#    BOARD = kr260 | kv260 (K26 SOM) | kd240 (K24 SOM)
+#    例: ruby ../configure.rb -T kria_arm64_gcc BOARD=kd240
+#  未指定時は kr260（既定）．
+#
+BOARD ?= kr260
+ifeq ($(BOARD),kr260)
+CDEFS := $(CDEFS) -DTOPPERS_KRIA_KR260
+else ifeq ($(BOARD),kv260)
+CDEFS := $(CDEFS) -DTOPPERS_KRIA_KV260
+else ifeq ($(BOARD),kd240)
+CDEFS := $(CDEFS) -DTOPPERS_KRIA_KD240
+else
+$(error BOARD は kr260 / kv260 / kd240 のいずれかを指定してください (指定値: $(BOARD)))
+endif
+
+#
+#  FPUサポート
+#
+#  FPUを使用する場合はUSE_ARM64_FPUをマクロ定義する．
+#
+CDEFS := $(CDEFS) -DUSE_ARM64_FPU
+
+#
+#  各セグメントの開始アドレスとサイズのディフォルト値の定義
+#
+ifeq ($(SYSMON),ATF_S)
+#
+#  ATF(Secure動作)に関する定義
+#
+CDEFS := $(CDEFS) -DTOPPERS_WITH_ATF
+CDEFS := $(CDEFS) -DTOPPERS_TZ_S
+CDEFS := $(CDEFS) -DSYSMON
+ifndef TOPPERS_MEM_BASE
+TOPPERS_MEM_BASE = 0x7F000000
+TOPPERS_MEM_SIZE = 0x00DF0000
+endif
+else ifeq ($(SYSMON),ATF_NS)
+#
+#  ATF(Non-Secure動作)に関する定義
+#
+CDEFS := $(CDEFS) -DTOPPERS_WITH_ATF
+CDEFS := $(CDEFS) -DTOPPERS_TZ_NS
+CDEFS := $(CDEFS) -DSYSMON
+ifndef TOPPERS_MEM_BASE
+TOPPERS_MEM_BASE = 0x08000000
+TOPPERS_MEM_SIZE = 0x3FE00000
+endif
+else
+#
+#  単独動作に関する定義
+#
+#CDEFS := $(CDEFS) -DTOPPERS_WITH_ATF
+CDEFS := $(CDEFS) -DTOPPERS_TZ_S
+#CDEFS := $(CDEFS) -USYSMON
+ifndef TOPPERS_MEM_BASE
+TOPPERS_MEM_BASE = 0x00000000
+TOPPERS_MEM_SIZE = 0x40000000
+endif
+endif
+
+TEXT_START_ADDRESS=$(TOPPERS_MEM_BASE)
+
+#
+#  コンパイルオプション
+#
+INCLUDES := $(INCLUDES) -I$(TARGETDIR)
+COPTS := $(COPTS) -mlittle-endian
+COPTS := $(COPTS) -gdwarf-4 -gstrict-dwarf  # デバッガがDWRAF-5未対応であることの対策
+LDFLAGS := $(LDFLAGS) -mlittle-endian -Wl,--build-id=none
+CFG1_OUT_LDFLAGS := -nostdlib $(CFG1_OUT_LDFLAGS)
+
+#
+#  ダンプするセクションの指定
+#
+DUMPOPTS := $(DUMPOPTS) -j .text -j .rodata
+
+#
+#  SIOPとするXUARTの番号
+#
+ifeq ($(SYSMON),ATF_S)
+SIOP = XUART0
+else
+SIOP = XUART1
+endif
+
+#
+# シリアルポートに関する設定
+#
+ifeq ($(SIOP),XUART0)
+CDEFS := $(CDEFS) -DUSE_XUART0
+else
+CDEFS := $(CDEFS) -DUSE_XUART1
+endif
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(CHIPDIR) $(TARGETDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) target_kernel_impl.o
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS) psci_support.o
+
+#
+#  リンカスクリプトの定義
+#
+LDSCRIPT = $(TARGETDIR)/kria.ld
+
+#
+#  TECSを外すかどうかの定義
+#
+OMIT_TECS = true
+
+#
+#  GNU開発環境のターゲットアーキテクチャの定義
+#
+GCC_TARGET = aarch64-none-elf
+
+#
+#  メモリアドレスの設定
+#
+CDEFS := $(CDEFS) -DTOPPERS_MEM_BASE=$(TOPPERS_MEM_BASE)
+CDEFS := $(CDEFS) -DTOPPERS_MEM_SIZE=$(TOPPERS_MEM_SIZE)
+CDEFS := $(CDEFS) -DTOPPERS_32BIT_ABOVE_ADDR
+CDEFS := $(CDEFS) -DUSE_ARM64_MMU_CONFIG_TABLE	#MMU設定を静的テーブルで渡す
+
+#
+#  プラットホームの判定
+#
+# setup.exeによるCygwinでは，PATHに/cygdrive/が入る
+ifneq (,$(findstring /cygdrive/,$(PATH)))
+    TARGET_UNAME := Cygwin
+else
+# gnupackのCygwinは/cygdrive/が無いため/c/WINDOWS/で判別する(/c/はWSLにも存在する)
+ifneq (,$(findstring /c/WINDOWS/,$(PATH)))
+    TARGET_UNAME := Cygwin
+else
+ifneq (,$(findstring /mnt/c/Windows/,$(PATH)))
+#, WSL
+    TARGET_UNAME := WSL
+else
+# Windows は shell uname が使えないないので，OSで判断
+ifeq ($(OS),Windows_NT)
+    TARGET_UNAME := Windows
+else
+# Linux, Darwin(Mac)
+    TARGET_UNAME := $(shell uname)
+endif
+endif
+endif
+endif
+
+#
+#  JTAG 実機実行・コンソール支援ターゲット（xsct / hw_server, Kria SOM）
+#
+#  別端末で 2 つに分けて使う:
+#    make console : Kria の PS UART1 コンソール（carrier card の USB シリアル
+#                   intf=01）を自動検出して開く（picocom/cu を自動選択）
+#    make run     : hw_server（常駐）へ attach し，★NCORES 個の A53 コアを
+#                   停止→rst-processor→dow→con で起動する（gdb 不要の一発実行）
+#
+#  補助:
+#    make hwserver : hw_server を前面起動（Ctrl-C で終了．通常は run が自動起動）
+#    make jtaggdb  : gdb.ini で aarch64 gdb を起動しソースデバッグ（要 hw_server）
+#
+#  ★★最重要（NOOUT の最頻原因）★★
+#    起動する A53 コア数 NCORES は，必ずバイナリの TNUM_PRCID（=PRC_NUM）と
+#    一致させること．_kernel_barrier_sync は起動時に TNUM_PRCID 個の全プロセッサ
+#    がバリアに到達するまでマスタ（A53#0）を待たせる（バリア到達はバナー出力より
+#    前）．コア数が足りないとバナーが 1 文字も出ず「無反応（NOOUT）」に見えるが，
+#    これはボード／UART の故障ではなく起動コア数の不足である．
+#    本 Makefile は NCORES を PRC_NUM から自動導出する（PRC_NUM 未指定時は
+#    target_kernel.h の既定 TNUM_PRCID=4 に一致させて 4）．したがって
+#    「PRC_NUM を指定せずビルドした sample1 等は 4 コアで起動」される．手動で
+#    tcl を叩く場合も ncores 引数を TNUM_PRCID に一致させること．
+#
+#  いずれもビルドディレクトリ（<OBJ>）で，事前に make でビルド済みのこと．
+#  上書き可能な変数: ELF（既定 $(OBJNAME)）, ENTRY（既定: ELF のエントリ＝0x0）,
+#                    NCORES（既定: PRC_NUM 又は 4）, TTY（既定: 自動検出）,
+#                    BAUD（既定 115200）, XSCT/HW_SERVER（既定: PATH 上の同名）.
+#    ※ xsct/hw_server には Vitis の bin へ PATH を通しておくこと
+#       （例: export PATH=<Vitis>/bin:$$PATH）．
+#
+XSCT       ?= xsct
+HW_SERVER  ?= hw_server
+JTAG_TCL    = $(TARGETDIR)/tools/jtag/jtag_a53_kria_attach.tcl
+ELF        ?= $(OBJNAME)
+#  実行開始番地は ELF のエントリポイント（本ターゲットでは 0x0）．
+ENTRY      ?= $(shell $(GCC_TARGET_PREFIX)readelf -h $(ELF) 2>/dev/null | sed -n 's/.*Entry point address:\s*//p')
+#  ★起動コア数 = TNUM_PRCID(=PRC_NUM)．PRC_NUM 未指定時は既定 4．
+NCORES     ?= $(if $(PRC_NUM),$(PRC_NUM),4)
+BAUD       ?= 115200
+
+.PHONY: run hwserver console jtaggdb
+
+#  hw_server を前面起動（通常は run が未起動時に自動起動するので不要）
+hwserver:
+	$(HW_SERVER) -stcp::3121
+
+#  hw_server（未起動なら自動起動・常駐）へ attach し NCORES コアで実機起動する．
+#    tcl（jtag_a53_kria_attach.tcl）が: 全A53を stop → 使用 NCORES コアのみ
+#    rst -processor（DDR保持）→ A53#0 へ dow・他コアに memmap → PC=ENTRY で con.
+#    ※事前にクリーンな U-Boot 起動状態（コンソールに ZynqMP>）にしておくこと．
+#    ※出力はコンソール（別端末の make console）に出る．
+run: all
+	@if ! (ss -ltn 2>/dev/null | grep -q ':3121 '); then \
+	  echo "[run] hw_server を起動します（background, log: /tmp/kria_hwserver.log）"; \
+	  ( $(HW_SERVER) -stcp::3121 >/tmp/kria_hwserver.log 2>&1 & ); \
+	  sleep 4; \
+	fi
+	@echo "[run] NCORES=$(NCORES) コアで起動します（PRC_NUM=$(PRC_NUM), ENTRY=$(ENTRY)）"
+	@echo "[run] ★NCORES は必ず TNUM_PRCID と一致していること（不一致だと barrier_sync で停止しバナー無出力）"
+	$(XSCT) $(JTAG_TCL) $(abspath $(ELF)) $(ENTRY) $(NCORES)
+
+#  Kria コンソール（PS UART1 = carrier card の USB シリアル intf=01）を開く．
+#    デバイスノード番号は USB 列挙順で変動するため model+intf で自動検出する．
+#    TTY を明示指定すれば自動検出をスキップする（例: make console TTY=/dev/ttyUSB7）．
+console:
+	@dev="$(TTY)"; \
+	if [ -z "$$dev" ]; then \
+	  for d in /dev/ttyUSB*; do \
+	    [ -e "$$d" ] || continue; \
+	    m=$$(udevadm info -q property -n "$$d" 2>/dev/null | sed -n 's/^ID_MODEL=//p'); \
+	    i=$$(udevadm info -q property -n "$$d" 2>/dev/null | sed -n 's/^ID_USB_INTERFACE_NUM=//p'); \
+	    case "$$m" in KR_Carrier_Card|ML_Carrier_Card|KD_Carrier_Card) \
+	      [ "$$i" = "01" ] && { dev="$$d"; break; } ;; esac; \
+	  done; \
+	fi; \
+	[ -n "$$dev" ] || { echo "Kria コンソール(carrier card intf=01)が見つかりません（lsusb に 0403:6011 が必要）"; exit 1; }; \
+	echo "[console] $$dev @ $(BAUD) 8N1"; \
+	if command -v picocom >/dev/null 2>&1; then \
+	  echo "[console] picocom -b $(BAUD) $$dev (exit: Ctrl-A Ctrl-X)"; picocom -b $(BAUD) "$$dev"; \
+	elif command -v cu >/dev/null 2>&1; then \
+	  echo "[console] cu -l $$dev -s $(BAUD) (exit: ~.)"; cu -l "$$dev" -s $(BAUD); \
+	else \
+	  echo "picocom か cu をインストールしてください（例: sudo apt-get install -y picocom）"; exit 1; \
+	fi
+
+#  gdb.ini で aarch64 gdb を起動しソースデバッグ（hw_server が起動済みのこと）．
+jtaggdb: all
+	$(GCC_TARGET_PREFIX)gdb -x $(TARGETDIR)/gdb.ini $(abspath $(ELF))
+
+#
+#  チップ依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)/Makefile.chip

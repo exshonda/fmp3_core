@@ -1,0 +1,34 @@
+# -*- coding: utf-8 -*-
+# 
+#		パス2の生成スクリプトのチップ依存部（Zynq7000用）
+# 
+
+#
+#  使用できる割込み番号とそれに対応する割込みハンドラ番号
+#
+$INTNO_VALID = {}
+$INHNO_VALID = {}
+private_intno_list = [ *(0..31) ]
+global_intno_list = [ *(32..95) ]
+1.upto($TNUM_PRCID) do |prcid|
+  $INTNO_VALID[prcid] = []
+  $INHNO_VALID[prcid] = []
+  private_intno_list.each do |intno|
+    $INTNO_VALID[prcid].push((prcid << 16) | intno)
+    $INHNO_VALID[prcid].push((prcid << 16) | intno)
+  end
+  global_intno_list.each do |intno|
+    $INTNO_VALID[prcid].push(intno)
+    $INHNO_VALID[prcid].push((prcid << 16) | intno)
+  end
+end
+
+#
+#  生成スクリプトのGIC依存部
+#
+IncludeTrb("gic_kernel.trb")
+
+# 
+#  生成スクリプトのコア依存部
+# 
+IncludeTrb("core_kernel.trb")

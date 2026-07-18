@@ -1,0 +1,98 @@
+/* This file is generated from core_rename.def by genrename. */
+
+/* This file is included only when core_rename.h has been included. */
+#ifdef TOPPERS_CORE_RENAME_H
+#undef TOPPERS_CORE_RENAME_H
+
+/*
+ *  kernel_cfg.c
+ */
+#undef p_inh_table
+#undef p_intcfg_table
+#undef p_exc_table
+
+/*
+ *  core_support.S
+ */
+#undef dispatch
+#undef start_dispatch
+#undef exit_and_dispatch
+#undef call_exit_kernel
+#undef dispatch_and_migrate
+#undef exit_and_migrate
+#undef start_r
+#undef irq_handler
+#undef undef_handler
+#undef svc_handler
+#undef pabort_handler
+#undef dabort_handler
+#undef fiq_handler
+
+
+/*
+ *  core_kernel_impl.c
+ */
+#undef start_sync
+#undef arm_mmu_initialize
+#undef arm_fpu_initialize
+#undef core_initialize
+#undef core_terminate
+#undef xlog_sys
+#undef xlog_fsr
+#undef default_int_handler
+#undef default_exc_handler
+#undef giant_lock
+
+/*
+ *  core_kernel_impl.h
+ */
+#undef lock_cpu
+#undef unlock_cpu
+#undef sense_lock
+
+/*
+ *  mpcore_kernel_impl.c
+ */
+#undef mpcore_mprc_initialize
+#undef mpcore_initialize
+#undef mpcore_terminate
+
+/*
+ *  mpcore_timer.c
+ */
+#undef target_hrt_initialize_global
+#undef target_hrt_terminate_global
+#undef target_hrt_initialize
+#undef target_hrt_terminate
+#undef target_hrt_handler
+#undef target_ovrtimer_initialize
+#undef target_ovrtimer_terminate
+#undef target_ovrtimer_handler
+
+/*
+ *  gic_kernel_impl.c
+ */
+#undef gicc_initialize
+#undef gicc_terminate
+#undef gicd_initialize
+#undef gicd_terminate
+
+/*
+ *  gic_support.S
+ */
+#undef irc_begin_int
+#undef irc_end_int
+#undef irc_get_intpri
+#undef irc_begin_exc
+#undef irc_end_exc
+
+/*
+ *  pl310.c
+ */
+#undef pl310_initialize
+#undef pl310_disable
+#undef pl310_invalidate_all
+#undef pl310_clean_and_invalidate_all
+
+
+#endif /* TOPPERS_CORE_RENAME_H */

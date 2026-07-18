@@ -1,0 +1,68 @@
+#
+#		Makefile のチップ依存部（RP2350 / Cortex-M33 用）
+#
+
+#
+#  チップ依存部ディレクトリ名の定義
+#
+CHIPDIR = $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)
+
+#
+#  コンパイルオプション
+#
+#  Cortex-M33（ARMv8-M Mainline），Thumb 命令のみ．RP2350 の M33 は FPU を
+#  搭載するが，Phase D1 ではソフトウェア浮動小数点 ABI を用いる（musca_b1 と
+#  同様．FPU 対応は後続フェーズ）．
+#
+COPTS := $(COPTS) -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
+LDFLAGS := $(LDFLAGS) -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
+CDEFS := $(CDEFS) -DTOPPERS_CORTEX_M33
+
+#
+#  ARMアーキテクチャの世代（ARMv8-M Mainline）
+#
+#  __TARGET_ARCH_THUMB は GNU 環境では定義されないため，明示的に定義する
+#  （5 = ARMv8-M）．
+#
+CDEFS := $(CDEFS) -D__TARGET_ARCH_THUMB=5
+
+#
+#  TrustZone 対応コアでのセキュア単独動作
+#
+#  RP2350 の bootROM は ARM イメージをセキュア状態で起動する．TrustZone 搭載
+#  コアでは例外リターン値 EXC_RETURN にセキュア状態を表すビットが必要なため，
+#  TOPPERS_ENABLE_TRUSTZONE を定義してセキュア用の EXC_RETURN（0xfffffffd）を
+#  選択する．これを定義しないと非セキュア用の 0xffffffbc が用いられ，最初の
+#  例外リターンで整合性チェックに失敗（INVPC UsageFault）する．
+#
+CDEFS := $(CDEFS) -DTOPPERS_ENABLE_TRUSTZONE
+
+INCLUDES := $(INCLUDES) -I$(CHIPDIR)
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(CHIPDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) chip_kernel_impl.o chip_ipi.o
+
+#
+#  システムサービスに関する定義（非TECS版 SIO ドライバ）
+#
+SYSSVC_DIRS := $(SYSSVC_DIRS) $(CHIPDIR)
+SYSSVC_COBJS := $(SYSSVC_COBJS) chip_serial.o
+
+#
+#  スタートアップモジュールに関する定義
+#
+START_OBJS := start.o $(START_OBJS)
+START_OBJS := $(addprefix $(OBJDIR)/, $(START_OBJS))
+
+$(START_OBJS): $(OBJDIR)/%.o: %.S
+	$(CC) -c -o $@ -MD -MP -MF $(DEPDIR)/$*.d $(CFLAGS) $(KERNEL_CFLAGS) $<
+
+LDFLAGS := -nostdlib $(LDFLAGS)
+
+#
+#  コア依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/common/Makefile.core

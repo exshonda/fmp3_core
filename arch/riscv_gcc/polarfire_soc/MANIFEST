@@ -1,0 +1,25 @@
+PACKAGE fmp3_arch_riscv_gcc_polarfire_soc
+VERSION 1.0.0
+
+chip_asm.inc
+chip_kernel.h
+chip_kernel.trb
+chip_kernel_impl.c
+chip_kernel_impl.h
+chip_rename.def
+chip_rename.h
+chip_serial.c
+chip_serial.cfg
+chip_serial.h
+chip_sil.h
+chip_stddef.h
+chip_support.S
+chip_timer.h
+chip_unrename.h
+chip_user.md
+clint_ipi.h
+Makefile.chip
+MANIFEST
+mmuart.c
+mmuart.h
+polarfire_soc.h

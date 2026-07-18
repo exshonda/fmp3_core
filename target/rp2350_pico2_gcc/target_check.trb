@@ -1,0 +1,9 @@
+# -*- coding: utf-8 -*-
+#
+#    チェックパスの生成スクリプトのターゲット依存部（RP2350 / RaspberryPi Pico 2用）
+#
+
+#
+#  生成スクリプトのチップ依存部（チップ依存部は core_check.trb を読む）
+#
+IncludeTrb("core_check.trb")

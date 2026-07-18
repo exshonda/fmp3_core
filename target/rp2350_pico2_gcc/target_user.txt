@@ -1,0 +1,167 @@
+=====================================================================
+            RP2350 / Raspberry Pi Pico 2 ターゲット依存部
+                            2020-2026 (C) Shinya Honda honda@ertl.jp
+                                  Last Modified:2026 Jun 20 00:00:00
+=====================================================================
+
+○概要
+
+RP2350 / Raspberry Pi Pico 2 依存部は，Raspberry Pi 社の RP2350（dual
+Cortex-M33）を搭載した実機ボード Raspberry Pi Pico 2 をサポートする．
+サポートしているプロセッサ数は 1〜2 個であり，ディフォルトでは 1 個で動
+作する．SMP（最大 2 コア）構成にも対応する．チップ依存部は arch/arm_m_
+gcc/rp2350，アーキテクチャ依存部は arch/arm_m_gcc（ARMv8-M Mainline，
+Cortex-M33）である．
+
+対応バージョンは FMP3 Release 3.4.0 である．
+
+本ターゲットは pico-sdk に依存しない自己完結（trunk 流の .trb／Makefile）
+構成であり，Core1（二次コア）の起動も RP2350 bootROM の multicore launch
+コマンドを自前で実装している（pico-sdk の multicore_launch_core1 と同じ
+ハンドシェイク列を再現）．
+
+ARMv8-M 共通の事項（NVIC／PendSV／例外モデル／TrustZone（セキュア単独
+動作）／ベクタ表生成等）はアーキテクチャ依存部のドキュメント arch/arm_m_
+gcc/doc を参照のこと．本書はボード／チップ（RP2350）固有の事項に集中する．
+
+●ボード
+
+動作確認を行ったボードは次の通りである．
+
+・Raspberry Pi Pico 2（RP2350A，dual Cortex-M33）
+
+●ツール（書込み・デバッグ）
+
+実機への書込み・デバッグは，Raspberry Pi Debugprobe（CMSIS-DAP，USB ID
+2e8a:000c）経由の OpenOCD で行う．
+
+  ・OpenOCD：pico-sdk 同梱版（Raspberry Pi フォーク．RP2350 に対応する）
+    を用いる．upstream の OpenOCD 0.12.0 は RP2350 に未対応であることを
+    確認している．
+  ・picotool：イメージ（ELF／UF2）の確認・書込みに用いる．生成物は
+    picotool で「rp2350-arm-s ／ RP2350 ／ ARM Secure」と認識される．
+
+実機の書込み・テスト実行手順（OpenOCD によるフラッシュ書込み，セミホス
+ティングによる結果取得，落とし穴と対策）の詳細は，本ターゲット直下の次
+のドキュメントにまとめてある．
+
+  TTSP3_HOWTO.md   （実機 TTSP3 実行手順＋落とし穴と対策）
+  target_design.md （ターゲット依存部の設計ノート）
+
+●コンパイラ
+
+ARM から公開されている GCC（arm-none-eabi-gcc）を用いる．Cortex-M33
+（ARMv8-M Mainline）向けに -mcpu=cortex-m33 -mthumb -mfloat-abi=soft
+（ソフトウェア浮動小数点 ABI）でビルドする．
+
+
+○システム構築手順
+
+RP2350 用の FMP3 カーネルを構築する手順は，「TOPPERS/FMP3 カーネル ユー
+ザーズマニュアル」の「３．クイックスタートガイド」の章に記述されている
+通りである．
+
+シリアルドライバを使用する際には以下のオプションでシリアルドライバと各
+種システムサービスをビルド対象とする（本ターゲットは非 TECS 版 SIO ドラ
+イバを用いる）．
+
+configure.rb -T rp2350_pico2_gcc -w -S "syslog.o banner.o serial.o serial_cfg.o chip_serial.o logtask.o"
+
+SMP（2 コア）構成でビルドする場合は，configure.rb に PRC_NUM=2 を指定す
+る．
+
+configure.rb -T rp2350_pico2_gcc -w -S "..." PRC_NUM=2
+
+実機で結果をセミホスティング（SWD／OpenOCD）経由で取得する場合は，make
+時に CDEFS へ -DTOPPERS_USE_SEMIHOSTING を追加する（UART 物理配線に依存
+せずログ・テスト結果を取得できる．詳細は TTSP3_HOWTO.md を参照）．
+
+
+○構成（RP2350 固有）
+
+本ターゲットの SMP／割込み／タイマ／コンソールの構成は次の通りである．
+
+・自プロセッサ番号の取得
+  SIO の CPUID レジスタ（RP2350_SIO_CPUID）を読んで自コア番号（0／1）を
+  直接得る（get_my_prcidx）．
+
+・ハードウェアスピンロック
+  RP2350 の SIO は 32 個のハードウェアスピンロックを備える．これをネイ
+  ティブスピンロック（0〜13），SIL ロック（15），ジャイアントロック（30）
+  に割り当てる．
+
+・プロセッサ間割込み（クロスコア IPI）
+  SIO の単方向 FIFO を用いる．送信は RP2350_SIO_FIFO_WR への書込み，受信
+  は SIO FIFO IRQ（IRQ 25）の割込みハンドラで RP2350_SIO_FIFO_RD を読ん
+  で IPI 種別（ディスパッチ要求／カーネル終了要求／高分解能タイマ設定要
+  求）を判別する．
+
+・二次コア（Core1）の起動
+  RP2350 bootROM の multicore launch を自前実装する．bootROM がリセット
+  後に Core1 を SIO FIFO 待ち受けループに入れるため，FIFO 列
+  { 0, 0, 1, VTOR, SP, entry } を送って Core1 を起動する（各ワードは Core1
+  bootROM がエコーバックし，一致しなければ最初からやり直す）．entry は
+  カーネルの _kernel_start，VTOR は PRC2 のベクタ表，SP は PRC2 の割込み
+  スタックである．
+
+・高分解能タイマ（HRT）
+  共有の TIMER0（1MHz）をイベント駆動 HRT として用いる．PRC1 は ALARM0，
+  PRC2 は ALARM1 を使用する．RP2350 では TICKS ブロックを設定しないと
+  TIMER0 が歩進しないため，マスタコアの起動時初期化で TICKS（clk_ref
+  12MHz ÷ 12 = 1MHz）を必ず設定する．
+
+・コンソール（UART）
+  UART0（PL011 系）を 115200bps で用いる．GP0=TX／GP1=RX（FUNCSEL=2）に
+  割り付ける．クロックは clk_peri＝clk_sys（150MHz）からルートする．
+
+・メモリ
+  QSPI フラッシュ 0x10000000（XIP，4MB）に TEXT／rodata，SRAM 0x20000000
+  （512KB）に DATA／BSS／スタックを配置する．bootROM がフラッシュ先頭から
+  IMAGE_DEF（PICOBIN ブロック，image_def.S）を探索し，イメージ先頭をベク
+  タ表とみなして SP=vector[0] / PC=vector[1] で起動する．
+
+・TrustZone（セキュア単独動作）
+  RP2350 bootROM は ARM イメージをセキュア状態で起動する．本ターゲットは
+  -DTOPPERS_ENABLE_TRUSTZONE を定義し，セキュア用の例外リターン値
+  （EXC_RETURN=0xfffffffd）を選択する（ARMv8-M 共通の事項．詳細は
+  arch/arm_m_gcc/doc を参照）．
+
+
+○カーネルの使用リソース
+
+プロセッサ毎にカーネルは以下のリソースを使用する．
+
+・タイマ
+  共有 TIMER0 のアラームを使用する．
+   PRC1：ALARM0（TIMER0_0_IRQn）
+   PRC2：ALARM1（TIMER0_1_IRQn）
+  なお ALARM2／ALARM3 はテスト用ソフトウェア割込みの代用として用いる
+  （target_test.h）．
+
+・UART
+  UART0（base 0x40070000，UART0_IRQn=33）をコンソールに使用する．
+  ボーレートは 115200（target_serial.h の BPS_SETTING）．
+
+・プロセッサ間割込み
+  SIO FIFO 割込み（SIO_FIFO_IRQn=25）を使用する．
+
+・SIO ハードウェアスピンロック
+  ネイティブスピンロック（0〜13），SIL ロック（15），ジャイアントロック
+  （30）を使用する．
+
+・メモリ
+  FLASH（XIP） : 0x10000000（4MB）
+  RAM（SRAM）  : 0x20000000（512KB）
+
+
+○変更履歴
+
+2026/06
+・最初のリリース．FMP3 3.4.0 へ移植．母体は fmp3_pico_sdk（FMP3 3.3.3
+  の Cortex-M マルチコア依存部）であり，pico-sdk 依存を排した自己完結
+  （trunk 流）構成とした．Core1 起動は bootROM multicore launch を自前
+  実装した．
+・実機 Raspberry Pi Pico 2 で sample1／test_task1（1PE／2PE）／mtskman1
+  を，SWD（OpenOCD）経由のセミホスティングで PASS することを確認した．
+
+以上．

@@ -1,0 +1,7 @@
+E_PACKAGE fmp3_rp2350_pico2_gcc
+VERSION %date
+
+INCLUDE ../../MANIFEST
+INCLUDE ../../arch/arm_m_gcc/MANIFEST
+INCLUDE ../../arch/arm_m_gcc/rp2350/MANIFEST
+INCLUDE MANIFEST

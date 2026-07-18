@@ -1,0 +1,27 @@
+# -*- coding: utf-8 -*-
+#
+#		パス2の生成スクリプトのチップ依存部（RP2350用）
+#
+#  ネイティブスピンロックは RP2350 の SIO ハードウェアスピンロック
+#  （SIO_SPINLOCKn）に割り当てる．chip_sil.h で SIL スピンロック=15，
+#  ジャイアントロック=30 を予約しているため，ネイティブスピンロックは
+#  0 から順に割り当てる（最大 TMAX_NATIVE_SPN=14 個）．
+#
+
+#
+#  コア依存テンプレートのインクルード
+#
+IncludeTrb("core_kernel.trb")
+
+#
+#  ネイティブスピンロックの生成（コア依存部の定義を SIO 版で上書きする）
+#
+#  spninib の lock メンバに SIO_SPINLOCKn のアドレスを格納する．
+#
+$rp2350_spinlock_index = 0
+
+def GenerateNativeSpn(params)
+  ret = "(intptr_t)RP2350_SIO_SPINLOCKn(#{$rp2350_spinlock_index})"
+  $rp2350_spinlock_index += 1
+  return(ret)
+end

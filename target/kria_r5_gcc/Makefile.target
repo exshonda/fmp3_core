@@ -1,0 +1,184 @@
+#
+#		Makefile のターゲット依存部（KRIA Cortex-R5F用）
+#
+#  $Id$
+#
+
+#
+#  システム名，チップ名，コア名，開発環境名の定義
+#
+SYS = kria_r5
+CHIP = zynqmp_r5
+CORE = arm
+TOOL = gcc
+
+#
+#  対象 Kria ボードの選択（バナー表示名のみに影響．RPU は全 Kria で同一）
+#    BOARD = kr260 | kv260 (K26 SOM) | kd240 (K24 SOM)
+#    例: ruby ../configure.rb -T kria_r5_gcc  →  make BOARD=kd240
+#  未指定時は kr260（既定）．
+#
+BOARD ?= kr260
+ifeq ($(BOARD),kr260)
+CDEFS := $(CDEFS) -DTOPPERS_KRIA_KR260
+else ifeq ($(BOARD),kv260)
+CDEFS := $(CDEFS) -DTOPPERS_KRIA_KV260
+else ifeq ($(BOARD),kd240)
+CDEFS := $(CDEFS) -DTOPPERS_KRIA_KD240
+else
+$(error BOARD は kr260 / kv260 / kd240 のいずれかを指定してください (指定値: $(BOARD)))
+endif
+
+#
+#  FPUサポートとABI
+#
+#  Cortex-R5FはVFPv3-D16を持つ．FPUを使用する場合に最適化されたABIを
+#  用いるため，-mfloat-abi=hardオプションを付ける．
+#
+COPTS := $(COPTS) -DUSE_ARM_FPU_ALWAYS -mfpu=vfpv3-d16 -mfloat-abi=hard
+
+#
+#  QEMUに関する定義
+#
+#  QEMU（xlnx-zcu102）のTTCモデルは133MHz固定であるため（実機のTTC入
+#  力クロックは100MHz），QEMU上で実行する場合はTTC_CLK_HZを133MHzに設
+#  定する．実機向けにビルドする場合は，QEMU=falseを指定する．
+#
+QEMU ?= true
+ifeq ($(QEMU),true)
+	COPTS := $(COPTS) -DTOPPERS_USE_QEMU
+	CDEFS := $(CDEFS) -DTTC_CLK_HZ=133000000
+endif
+
+#
+#  コンパイルオプション
+#
+INCLUDES := $(INCLUDES) -I$(TARGETDIR)
+COPTS := $(COPTS) -mlittle-endian
+LDFLAGS := $(LDFLAGS) -mlittle-endian
+CDEFS := $(CDEFS) -DUSE_BYPASS_IPI_DISPATCH_HANDER -DTOPPERS_OMIT_USE_WFE
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIRS := $(KERNEL_DIRS) $(TARGETDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) target_kernel_impl.o
+
+#
+#  リンカスクリプトの定義
+#
+LDSCRIPT = $(TARGETDIR)/kria_r5.ld
+
+#
+#  チップ依存部
+#
+include $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)/Makefile.chip
+
+#
+#  アップストリームQEMU（11.0以降のxlnx-zcu102）でのlockstep相当
+#  （1コア）実行
+#
+#    - -smp 6 必須（R5Fが2個生成された時のみGICC(0xF9001000)がマップされる）
+#    - boot-cpuでRPU0を電源ON，mp-affinity=0で実機同様Aff0=0にする
+#    - serial0=UART0，serial1=UART1（コンソールはUART1）
+#  デバッグ: runqugでQEMU起動後，gdb-multiarchで
+#    target extended-remote :1234 / add-inferior / inferior 2 / attach 2
+#
+QEMU_UPSTREAM = qemu-system-aarch64
+
+runqu: $(OBJFILE)
+	$(QEMU_UPSTREAM) -M xlnx-zcu102 -smp 6 -m 2G -nographic \
+	 -global xlnx-zynqmp.boot-cpu=rpu-cpu[0] \
+	 -global cortex-r5f-arm-cpu.mp-affinity=0 \
+	 -device loader,file=$(OBJFILE),cpu-num=4 \
+	 -serial null -serial mon:stdio
+
+runqug: $(OBJFILE)
+	$(QEMU_UPSTREAM) -M xlnx-zcu102 -smp 6 -m 2G -nographic \
+	 -global xlnx-zynqmp.boot-cpu=rpu-cpu[0] \
+	 -global cortex-r5f-arm-cpu.mp-affinity=0 \
+	 -device loader,file=$(OBJFILE),cpu-num=4 \
+	 -serial null -serial mon:stdio \
+	 -S -gdb tcp::1234
+
+#
+#  JTAG 実機実行・コンソール支援ターゲット（xsct / hw_server, Kria RPU R5）
+#
+#  別端末で 2 つに分けて使う:
+#    make console : Kria の PS UART1 コンソール（carrier card の USB シリアル
+#                   intf=01）を自動検出して開く（picocom/cu を自動選択）
+#    make run     : hw_server（常駐）へ attach し，RPU を split にして ★NCORES 個の
+#                   R5 コアを rst-processor→dow→con で起動する（gdb 不要の一発実行）
+#
+#  補助:
+#    make hwserver : hw_server を前面起動（Ctrl-C で終了．通常は run が自動起動）
+#
+#  ★★最重要（NOOUT の最頻原因）★★
+#    起動する R5 コア数 NCORES は，必ずバイナリの TNUM_PRCID（=PRC_NUM）と
+#    一致させること．barrier_sync は起動時に TNUM_PRCID 個の全プロセッサがバリア
+#    に到達するまでマスタ（R5#0）を待たせる（バリア到達はバナー出力より前）．
+#    コア数が足りないとバナーが 1 文字も出ず「無反応（NOOUT）」に見えるが，これは
+#    ボード／UART の故障ではなく起動コア数の不足である．
+#    本 Makefile は NCORES を PRC_NUM から自動導出する（PRC_NUM 未指定時は
+#    target_kernel.h の既定 TNUM_PRCID=1 に一致させて 1）．sample1 等 PRC_NUM を
+#    指定しないビルドは「1 コア（R5#0 のみ）」で起動する．
+#    ※ R5 と A53(APU) は同じ PS UART1 を共有する．A53 側で別カーネルが走っている
+#      とコンソールが混信するため，クリーンな U-Boot 起動状態で使うこと．
+#
+#  上書き可能な変数: ELF（既定 $(OBJNAME)）, NCORES（既定: PRC_NUM 又は 1）,
+#                    TTY（既定: 自動検出）, BAUD（既定 115200）,
+#                    XSCT/HW_SERVER（既定: PATH 上の同名．Vitis の bin へ PATH を通す）.
+#
+XSCT       ?= xsct
+HW_SERVER  ?= hw_server
+JTAG_TCL    = $(TARGETDIR)/tools/jtag/jtag_r5_kria_attach.tcl
+ELF        ?= $(OBJNAME)
+#  ★起動コア数 = TNUM_PRCID(=PRC_NUM)．PRC_NUM 未指定時は R5 既定 1．
+NCORES     ?= $(if $(PRC_NUM),$(PRC_NUM),1)
+BAUD       ?= 115200
+
+.PHONY: run hwserver console
+
+#  hw_server を前面起動（通常は run が未起動時に自動起動するので不要）
+hwserver:
+	$(HW_SERVER) -stcp::3121
+
+#  hw_server（未起動なら自動起動・常駐）へ attach し RPU split で NCORES コア起動．
+#    tcl（jtag_r5_kria_attach.tcl）が: enable_split_mode → clear_rpu_reset →
+#    使用 NCORES 個の R5 に rst -processor + dow（.vector→TCM, .text→DDR）→ con.
+#    ※事前にクリーンな U-Boot 起動状態にしておくこと．出力はコンソール（別端末の
+#      make console）に出る．
+run: all
+	@if ! (ss -ltn 2>/dev/null | grep -q ':3121 '); then \
+	  echo "[run] hw_server を起動します（background, log: /tmp/kria_hwserver.log）"; \
+	  ( $(HW_SERVER) -stcp::3121 >/tmp/kria_hwserver.log 2>&1 & ); \
+	  sleep 4; \
+	fi
+	@echo "[run] NCORES=$(NCORES) コア(R5)で起動します（PRC_NUM=$(PRC_NUM)）"
+	@echo "[run] ★NCORES は必ず TNUM_PRCID と一致していること（不一致だと barrier_sync で停止しバナー無出力）"
+	$(XSCT) $(JTAG_TCL) $(abspath $(ELF)) $(NCORES)
+
+#  Kria コンソール（PS UART1 = carrier card の USB シリアル intf=01）を開く．
+#    デバイスノード番号は USB 列挙順で変動するため model+intf で自動検出する．
+#    TTY を明示指定すれば自動検出をスキップする（例: make console TTY=/dev/ttyUSB7）．
+console:
+	@dev="$(TTY)"; \
+	if [ -z "$$dev" ]; then \
+	  for d in /dev/ttyUSB*; do \
+	    [ -e "$$d" ] || continue; \
+	    m=$$(udevadm info -q property -n "$$d" 2>/dev/null | sed -n 's/^ID_MODEL=//p'); \
+	    i=$$(udevadm info -q property -n "$$d" 2>/dev/null | sed -n 's/^ID_USB_INTERFACE_NUM=//p'); \
+	    case "$$m" in KR_Carrier_Card|ML_Carrier_Card|KD_Carrier_Card) \
+	      [ "$$i" = "01" ] && { dev="$$d"; break; } ;; esac; \
+	  done; \
+	fi; \
+	[ -n "$$dev" ] || { echo "Kria コンソール(carrier card intf=01)が見つかりません（lsusb に 0403:6011 が必要）"; exit 1; }; \
+	echo "[console] $$dev @ $(BAUD) 8N1"; \
+	if command -v picocom >/dev/null 2>&1; then \
+	  echo "[console] picocom -b $(BAUD) $$dev (exit: Ctrl-A Ctrl-X)"; picocom -b $(BAUD) "$$dev"; \
+	elif command -v cu >/dev/null 2>&1; then \
+	  echo "[console] cu -l $$dev -s $(BAUD) (exit: ~.)"; cu -l "$$dev" -s $(BAUD); \
+	else \
+	  echo "picocom か cu をインストールしてください（例: sudo apt-get install -y picocom）"; exit 1; \
+	fi
+

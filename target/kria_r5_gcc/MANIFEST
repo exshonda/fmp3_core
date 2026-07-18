@@ -1,0 +1,32 @@
+PACKAGE fmp3_target_kria_r5_gcc
+VERSION 3.4.0
+
+E_PACKAGE
+Makefile.target
+MANIFEST
+target_cfg1_out.h
+target_check.trb
+target_class.trb
+target_ipi.cfg
+target_ipi.h
+target_kernel.cfg
+target_kernel.h
+target_kernel.trb
+target_kernel_impl.c
+target_kernel_impl.h
+target_rename.def
+target_rename.h
+target_serial.cfg
+target_serial.h
+target_sil.h
+target_stddef.h
+target_syssvc.h
+target_test.h
+target_timer.cfg
+target_timer.h
+target_unrename.h
+target_user.txt
+tools/jtag/jtag_r5_kria_attach.tcl
+tools/jtag/jtag_r5_2core_kria.tcl
+tools/jtag/run_ttsp_r5_kria.sh
+kria_r5.ld

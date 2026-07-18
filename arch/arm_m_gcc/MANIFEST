@@ -1,0 +1,29 @@
+PACKAGE fmp3_arch_arm_m_gcc
+VERSION 3.4.0
+
+MANIFEST
+
+common/arm_m.h
+common/core_asm.inc
+common/core_cfg1_out.h
+common/core_check.trb
+common/core_insn.h
+common/core_kernel.h
+common/core_kernel_impl.c
+common/core_kernel_impl.h
+common/core_kernel.trb
+common/core_offset.trb
+common/core_pcb.h
+common/core_rename.def
+common/core_rename.h
+common/core_sil.h
+common/core_stddef.h
+common/core_support.S
+common/core_sym.def
+common/core_test.h
+common/core_unrename.h
+common/Makefile.core
+common/start.S
+
+doc/arm_m_design.md
+doc/arm_m_user.txt

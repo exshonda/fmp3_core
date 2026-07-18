@@ -1,0 +1,9 @@
+# chip_kernel_impl.c
+start_sync
+chip_el3_initialize
+chip_el2_initialize
+chip_mprc_initialize
+chip_initialize
+chip_exit
+
+INCLUDE "core"
