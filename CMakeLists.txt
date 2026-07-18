@@ -422,3 +422,51 @@ add_custom_target(generate_cfg_gen_files
     DEPENDS ${OFFSET_TIMESTAMP} ${KERNEL_CFG_TIMESTAMP}
 )
 set_source_files_properties(${KERNEL_CFG_C_FILE} PROPERTIES GENERATED TRUE)
+
+#
+#  カーネルライブラリ（libfmp3.a）
+#
+#  カーネルの .c は上流 kernel/Makefile.kernel の KERNEL_FCSRCS（22個）に
+#  対応する．上流は1つの .c から複数の .o を作る（ALLFUNC を定義しない）
+#  ビルドもできるが，CMake 側は asp3_core と同じく .c を1回ずつコンパイルし，
+#  ALLFUNC を定義して全関数を1つの .o に入れる．
+#
+add_library(fmp3 STATIC
+    ${FMP3_ARCH_C_FILES}
+    ${FMP3_TARGET_C_FILES}
+    ${FMP3_ROOT_DIR}/kernel/startup.c
+    ${FMP3_ROOT_DIR}/kernel/task.c
+    ${FMP3_ROOT_DIR}/kernel/taskhook.c
+    ${FMP3_ROOT_DIR}/kernel/wait.c
+    ${FMP3_ROOT_DIR}/kernel/time_event.c
+    ${FMP3_ROOT_DIR}/kernel/task_manage.c
+    ${FMP3_ROOT_DIR}/kernel/task_refer.c
+    ${FMP3_ROOT_DIR}/kernel/task_sync.c
+    ${FMP3_ROOT_DIR}/kernel/task_term.c
+    ${FMP3_ROOT_DIR}/kernel/semaphore.c
+    ${FMP3_ROOT_DIR}/kernel/eventflag.c
+    ${FMP3_ROOT_DIR}/kernel/dataqueue.c
+    ${FMP3_ROOT_DIR}/kernel/pridataq.c
+    ${FMP3_ROOT_DIR}/kernel/mutex.c
+    ${FMP3_ROOT_DIR}/kernel/mempfix.c
+    ${FMP3_ROOT_DIR}/kernel/time_manage.c
+    ${FMP3_ROOT_DIR}/kernel/cyclic.c
+    ${FMP3_ROOT_DIR}/kernel/alarm.c
+    ${FMP3_ROOT_DIR}/kernel/spin_lock.c
+    ${FMP3_ROOT_DIR}/kernel/sys_manage.c
+    ${FMP3_ROOT_DIR}/kernel/interrupt.c
+    ${FMP3_ROOT_DIR}/kernel/exception.c
+    ${KERNEL_CFG_C_FILE}
+)
+add_dependencies(fmp3 generate_cfg_gen_files)
+
+target_include_directories(fmp3
+    PUBLIC  ${FMP3_INCLUDE_DIRS}
+    PRIVATE ${FMP3_ROOT_DIR}/kernel
+)
+#  ALLFUNC: 上流 sample/Makefile:302 の KERNEL_CFLAGS := -DALLFUNC ...
+target_compile_definitions(fmp3
+    PRIVATE ALLFUNC
+    PUBLIC  ${FMP3_COMPILE_DEFS}
+)
+target_compile_options(fmp3 PUBLIC ${FMP3_COMPILE_OPTIONS})
