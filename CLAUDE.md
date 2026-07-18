@@ -20,8 +20,12 @@
   `m5stamp_esp32p4_gcc`（ESP32-P4 ターゲット依存部）は `fmp3_esp_idf`（別リポジトリ）で
   管理する方針のため除外（他5個＝このプロジェクトで使わない、とは理由が異なる）。
   `arch/riscv_gcc/esp32p4`（chip 依存部）は pristine のまま残っている。
-- **`CMakeLists.txt` は雛形のままで、ビルドは通らない**（`add_subdirectory` 無し）。
-  `cfg_py/` も README のみで実装が無い。したがって「ビルドして確認」はまだ成立しない。
+- **polarfire_soc_kit_gcc は CMake でビルドでき、QEMU で動く**（計画A完了）。
+  `cmake --preset polarfire_soc_kit-qemu && cmake --build build/polarfire_soc_kit-qemu --target run`
+- ただし **cfg は `cfg_py/cfg.py`（pristine の Ruby `cfg/cfg.rb` へ委譲するシム）を使っている
+  足場の状態**である。計画Bでシムを asp3_core 1.7.1 の本物のエンジンへ差し替える
+  （DIVERGENCE_MAP.md の「期限付きの逸脱」参照）。
+- 他の5ターゲットは未対応（`target.cmake` が無い）。
 
 ```bash
 # 上流 archive の位置（このリポジトリから見て ../fmp3_archive）

@@ -518,9 +518,20 @@ function(fmp3_cfg_check TARGET)
 endfunction()
 
 if(FMP3_LIBRARY_ONLY)
-    #  外部 SDK 側が最終 ELF を作るため，pass3 の材料を渡す
-    set(FMP3_PASS3_ARGS   ${PASS3_ARGS}  PARENT_SCOPE)
-    set(FMP3_CFG_GEN_DIR  ${CFG_GEN_DIR} PARENT_SCOPE)
+    #  外部 SDK 側が最終 ELF を作るため，pass3 の材料を渡す．
+    #
+    #  本リポジトリ自身をトップレベル project として configure した場合
+    #  （このリポジトリ単体で FMP3_LIBRARY_ONLY=ON を試すとき）は親スコープが
+    #  存在しないため，PARENT_SCOPE の set() は CMake の dev warning
+    #  （"current scope has no parent"）を出す。想定される使い方は
+    #  add_subdirectory() 経由（fmp3_esp_idf / fmp3_pico_sdk のような外部
+    #  SDK リポジトリから）であり，そのときだけ親スコープへの export に
+    #  意味があるので，ここでガードする（Task 9 検証：add_subdirectory()
+    #  経由なら警告は出ず，FMP3_PASS3_ARGS / FMP3_CFG_GEN_DIR は親から見える）。
+    if(NOT CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+        set(FMP3_PASS3_ARGS   ${PASS3_ARGS}  PARENT_SCOPE)
+        set(FMP3_CFG_GEN_DIR  ${CFG_GEN_DIR} PARENT_SCOPE)
+    endif()
 endif()
 
 if(NOT FMP3_LIBRARY_ONLY)
