@@ -179,11 +179,40 @@ if [ "${LINK_STEP1}" = "${LINK_RAW}" ]; then
     echo "  ninja command was: ${LINK_RAW}" >&2
     exit 2
 fi
+#  ★修正3（kria_r5で発覚）: 旧実装は「start.S.objだけ」を名指しで絶対化
+#  していたが、kria_r5_gccのcfg1_outはstart.S.obj（arch/arm_gcc/common/）
+#  に加えchip_support.S.obj（arch/arm_gcc/zynqmp_r5/）もリンクする
+#  （kria_r5が初めてcfg1_outで.Sオブジェクトを2個以上リンクするターゲット
+#  だった）。start.S.objは絶対化されリンクできる一方、chip_support.S.obj
+#  は相対パスのまま残り、一時ディレクトリからのリンクが
+#  「cannot find CMakeFiles/cfg1_out.dir/.../chip_support.S.obj」で失敗する。
+#  かつ「1箇所でも一致すれば非等価」という素朴な等価性チェックでは、
+#  start.S.objの置換が実際に一致するため「置換漏れ」に気付けない
+#  （FATALガードが発火しない）。
+#  修正: cfg1_out.c.obj（既にLINK_STEP1で絶対化済み）を除く、
+#  CMakeFiles/cfg1_out.dir/配下の*.objをすべて（sedの/gで複数個まとめて）
+#  絶対化する。今後さらに.Sオブジェクトが増えるターゲットが来ても対応する。
 LINK_STEP2="$(printf '%s\n' "${LINK_STEP1}" \
-    | sed -E "s#CMakeFiles/cfg1_out\.dir/([a-zA-Z0-9_./]*start\.S\.obj)#${BUILD_DIR}/CMakeFiles/cfg1_out.dir/\1#")"
+    | sed -E "s#CMakeFiles/cfg1_out\.dir/([a-zA-Z0-9_./]*\.obj)#${BUILD_DIR}/CMakeFiles/cfg1_out.dir/\1#g")"
 if [ "${LINK_STEP2}" = "${LINK_STEP1}" ]; then
-    echo "run.sh: FATAL: link-command start.S.obj substitution did not match" >&2
+    echo "run.sh: FATAL: link-command object-path substitution did not match" \
+         "(expected at least one CMakeFiles/cfg1_out.dir/*.obj besides" \
+         "cfg1_out.c.obj, e.g. start.S.obj)" >&2
     echo "  ninja command was: ${LINK_STEP1}" >&2
+    exit 2
+fi
+#  念のため：置換後にまだ相対パスの CMakeFiles/cfg1_out.dir/ が残っていない
+#  ことを確認する（正規表現が拾えない拡張子のオブジェクトが将来現れた場合の
+#  サイレント回帰を防ぐ）。★絶対化済みのパスも文字列としては
+#  "CMakeFiles/cfg1_out.dir/" を部分文字列に含む（例:
+#  ".../build/kria_r5/CMakeFiles/cfg1_out.dir/..."）ため、単純な文字列一致
+#  では常に「真」になり誤検出する。「直前が '/' ではない」＝絶対化されて
+#  いない相対パスの出現だけを検出する。
+if printf '%s\n' "${LINK_STEP2}" | grep -qE '(^|[^/])CMakeFiles/cfg1_out\.dir/'; then
+    echo "run.sh: FATAL: link command still contains an unabsolutized" \
+         "CMakeFiles/cfg1_out.dir/ path after substitution (regex did not" \
+         "match an object file; update the .obj pattern)" >&2
+    echo "  ninja command was: ${LINK_STEP2}" >&2
     exit 2
 fi
 LINK_CMD="$(printf '%s\n' "${LINK_STEP2}" \
