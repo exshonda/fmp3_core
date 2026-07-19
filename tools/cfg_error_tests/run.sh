@@ -227,22 +227,48 @@ fi
 bash -c "${NM_CMD}" > "${COMPILE_DIR}/nm.log" 2>&1
 NM_RC=$?
 
+#  ★ROM イメージの生成方式（objcopy -O srec か、objdump 経由の .dump か）は
+#  ターゲットの FMP3_DUMP_FORMAT（既定 srec、kria_arm64_gcc は dump）で
+#  変わる（tools/cfg_equivalence.sh が Task 6 で対応済みだったのと同じ
+#  分岐だが、本スクリプトは未対応だった。Task 7 で実測して発覚・修正）。
+#  まず srec 生成コマンドを試み、無ければ cfg1_out_srec フォニーターゲット
+#  経由で dump 生成コマンド（objdump_to_file.cmake）を試す。
+ROMIMG_EXT="srec"
 OBJCOPY_RAW="$(ninja -C "${BUILD_DIR}" -t commands generated/cfg1_out.srec 2>/dev/null | grep -- '-O srec')"
 if [ -z "${OBJCOPY_RAW}" ]; then
-    echo "run.sh: could not extract objcopy command" >&2
+    ROMIMG_EXT="dump"
+    OBJCOPY_RAW="$(ninja -C "${BUILD_DIR}" -t commands cfg1_out_srec 2>/dev/null | grep 'objdump_to_file.cmake')"
+fi
+if [ -z "${OBJCOPY_RAW}" ]; then
+    echo "run.sh: could not extract objcopy/objdump command" >&2
     exit 2
 fi
-OBJCOPY_STEP1="$(printf '%s\n' "${OBJCOPY_RAW}" | sed -E "s#[^ ]*/cfg1_out #${COMPILE_DIR}/cfg1_out #")"
-if [ "${OBJCOPY_STEP1}" = "${OBJCOPY_RAW}" ]; then
-    echo "run.sh: FATAL: objcopy-command cfg1_out (ELF input) substitution did not match" >&2
-    echo "  ninja command was: ${OBJCOPY_RAW}" >&2
-    exit 2
-fi
-OBJCOPY_CMD="$(printf '%s\n' "${OBJCOPY_STEP1}" | sed -E "s#[^ ]*generated/cfg1_out\.srec#${COMPILE_DIR}/cfg1_out.srec#")"
-if [ "${OBJCOPY_CMD}" = "${OBJCOPY_STEP1}" ]; then
-    echo "run.sh: FATAL: objcopy-command cfg1_out.srec (output) substitution did not match" >&2
-    echo "  ninja command was: ${OBJCOPY_STEP1}" >&2
-    exit 2
+if [ "${ROMIMG_EXT}" = "srec" ]; then
+    OBJCOPY_STEP1="$(printf '%s\n' "${OBJCOPY_RAW}" | sed -E "s#[^ ]*/cfg1_out #${COMPILE_DIR}/cfg1_out #")"
+    if [ "${OBJCOPY_STEP1}" = "${OBJCOPY_RAW}" ]; then
+        echo "run.sh: FATAL: objcopy-command cfg1_out (ELF input) substitution did not match" >&2
+        echo "  ninja command was: ${OBJCOPY_RAW}" >&2
+        exit 2
+    fi
+    OBJCOPY_CMD="$(printf '%s\n' "${OBJCOPY_STEP1}" | sed -E "s#[^ ]*generated/cfg1_out\.srec#${COMPILE_DIR}/cfg1_out.srec#")"
+    if [ "${OBJCOPY_CMD}" = "${OBJCOPY_STEP1}" ]; then
+        echo "run.sh: FATAL: objcopy-command cfg1_out.srec (output) substitution did not match" >&2
+        echo "  ninja command was: ${OBJCOPY_STEP1}" >&2
+        exit 2
+    fi
+else
+    OBJCOPY_STEP1="$(printf '%s\n' "${OBJCOPY_RAW}" | sed -E "s#-DELF=[^ ]*/cfg1_out #-DELF=${COMPILE_DIR}/cfg1_out #")"
+    if [ "${OBJCOPY_STEP1}" = "${OBJCOPY_RAW}" ]; then
+        echo "run.sh: FATAL: objdump-command -DELF substitution did not match" >&2
+        echo "  ninja command was: ${OBJCOPY_RAW}" >&2
+        exit 2
+    fi
+    OBJCOPY_CMD="$(printf '%s\n' "${OBJCOPY_STEP1}" | sed -E "s#-DOUT=[^ ]*generated/cfg1_out\.dump#-DOUT=${COMPILE_DIR}/cfg1_out.dump#")"
+    if [ "${OBJCOPY_CMD}" = "${OBJCOPY_STEP1}" ]; then
+        echo "run.sh: FATAL: objdump-command -DOUT substitution did not match" >&2
+        echo "  ninja command was: ${OBJCOPY_STEP1}" >&2
+        exit 2
+    fi
 fi
 bash -c "${OBJCOPY_CMD}" > "${COMPILE_DIR}/objcopy.log" 2>&1
 OBJCOPY_RC=$?
@@ -252,17 +278,17 @@ if [ "${NM_RC}" != 0 ] || [ ! -s "${COMPILE_DIR}/cfg1_out.syms" ]; then
     cat "${COMPILE_DIR}/nm.log" >&2
     exit 2
 fi
-if [ "${OBJCOPY_RC}" != 0 ] || [ ! -s "${COMPILE_DIR}/cfg1_out.srec" ]; then
-    echo "run.sh: objcopy failed (rc=${OBJCOPY_RC})" >&2
+if [ "${OBJCOPY_RC}" != 0 ] || [ ! -s "${COMPILE_DIR}/cfg1_out.${ROMIMG_EXT}" ]; then
+    echo "run.sh: objcopy/objdump failed (rc=${OBJCOPY_RC})" >&2
     cat "${COMPILE_DIR}/objcopy.log" >&2
     exit 2
 fi
-echo "== compiled fresh cfg1_out ELF for this .cfg (.syms/.srec regenerated, not reused) =="
+echo "== compiled fresh cfg1_out ELF for this .cfg (.syms/.${ROMIMG_EXT} regenerated, not reused) =="
 
 cp "${COMPILE_DIR}/cfg1_out.syms" "${RUBY_DIR}/cfg1_out.syms"
-cp "${COMPILE_DIR}/cfg1_out.srec" "${RUBY_DIR}/cfg1_out.srec"
+cp "${COMPILE_DIR}/cfg1_out.${ROMIMG_EXT}" "${RUBY_DIR}/cfg1_out.${ROMIMG_EXT}"
 cp "${COMPILE_DIR}/cfg1_out.syms" "${PY_DIR}/cfg1_out.syms"
-cp "${COMPILE_DIR}/cfg1_out.srec" "${PY_DIR}/cfg1_out.srec"
+cp "${COMPILE_DIR}/cfg1_out.${ROMIMG_EXT}" "${PY_DIR}/cfg1_out.${ROMIMG_EXT}"
 
 #
 #  == Stage 3: pass2（kernel_cfg.c/h生成。kernel/interrupt.pyのE_RSATR等の

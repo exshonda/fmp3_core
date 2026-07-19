@@ -125,15 +125,27 @@ include(${CHIPDIR}/chip.cmake)
 #  のため既定では使わない。musca_b1/target.cmake と同じバージョン
 #  チェック方式）。
 #
-set(_fmp3_kria_arm64_qemu_builtin /home/honda/qemu-build/install/bin/qemu-system-aarch64)
-if(EXISTS ${_fmp3_kria_arm64_qemu_builtin})
-    set(_fmp3_kria_arm64_qemu_default ${_fmp3_kria_arm64_qemu_builtin})
-else()
-    set(_fmp3_kria_arm64_qemu_default qemu-system-aarch64)
-endif()
+#  ★実測（Task 7）：/home/honda/qemu-build/install/bin/ には
+#    qemu-system-arm（musca_b1用）しかインストールされておらず，
+#    qemu-system-aarch64 は存在しない。11.0.1 の aarch64 バイナリは
+#    ビルドツリー配下 qemu-11.0.1/build-a64/ に置かれたまま（未
+#    `make install`）だったため，そちらもフォールバック候補に加える。
+#    将来 install/bin に aarch64 が入れば，そちらが優先される。
+set(_fmp3_kria_arm64_qemu_candidates
+    /home/honda/qemu-build/install/bin/qemu-system-aarch64
+    /home/honda/qemu-build/qemu-11.0.1/build-a64/qemu-system-aarch64
+)
+set(_fmp3_kria_arm64_qemu_default qemu-system-aarch64)
+foreach(_fmp3_kria_arm64_qemu_cand ${_fmp3_kria_arm64_qemu_candidates})
+    if(EXISTS ${_fmp3_kria_arm64_qemu_cand})
+        set(_fmp3_kria_arm64_qemu_default ${_fmp3_kria_arm64_qemu_cand})
+        break()
+    endif()
+endforeach()
 set(QEMU_SYSTEM_AARCH64_KRIA ${_fmp3_kria_arm64_qemu_default} CACHE STRING
     "Path to qemu-system-aarch64 for the xlnx-zcu102 machine (needs >= 11.0.1)")
-unset(_fmp3_kria_arm64_qemu_builtin)
+unset(_fmp3_kria_arm64_qemu_candidates)
+unset(_fmp3_kria_arm64_qemu_cand)
 unset(_fmp3_kria_arm64_qemu_default)
 
 execute_process(
@@ -178,9 +190,17 @@ if(NOT FMP3_PRC_NUM STREQUAL "")
 else()
     set(_fmp3_kria_arm64_smp 4)
 endif()
+#  実測（Task 7）で判明: 本ターゲットは USE_XUART1（上記, Makefile.target:
+#  100-115 由来）でコンソールを UART1 (0xFF010000) に出す。QEMU の
+#  hw/arm/xlnx-zynqmp.c は uart[i] に serial_hd(i) を割り当てる
+#  (uart_addr = {0xFF000000, 0xFF010000})。-serial を1個しか渡さないと
+#  index0=UART0 に繋がり、カーネルが書き込む UART1 にはバックエンドが無く
+#  コンソール出力がエラーも出さず黙って消える（QEMUの-serial割当ての罠。
+#  実機やゲスト側からは検知できない）。-serial を2個
+#  (UART0=null, UART1=mon:stdio) 渡す必要がある。
 set(FMP3_RUN_COMMAND
     ${QEMU_SYSTEM_AARCH64_KRIA} -M xlnx-zcu102,secure=on -smp ${_fmp3_kria_arm64_smp} -m 2G
-    -nographic -serial mon:stdio
+    -nographic -serial null -serial mon:stdio
     -kernel $<TARGET_FILE:fmp>
 )
 unset(_fmp3_kria_arm64_smp)

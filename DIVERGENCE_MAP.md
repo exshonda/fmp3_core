@@ -182,6 +182,47 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
   （出現順を保った重複除去、Rubyの`.uniq`と同義）に置き換えて解消した
   （`kernel/interrupt.py`、修正3のコミットと同時に対応）。
 
+- **（2026-07-19 解消／事前調査を否定）`chip_el3_initialize()`（`arch/arm64_gcc/zynqmp/
+  chip_kernel_impl.c:55-81`）の System Timestamp Generator（`0xFF260000`）への無条件書き込みが
+  QEMU 11.0.1 で同期外部アボートを起こす、という Task 4-6 着手前の事前調査の**強い状況証拠は，
+  実行して確認した結果，再現しなかった**。**pristine は無改変のまま。**
+
+  実測（`/home/honda/qemu-build/qemu-11.0.1/build-a64/qemu-system-aarch64`、`-M
+  xlnx-zcu102,secure=on -smp 1|4 -m 2G -nographic -d guest_errors,unimp`）：
+  1コア・4コアいずれも `timeout 20` で rc=124（タイムアウトによる正常継続）、
+  デバッグログ（`-d guest_errors,unimp`）に `0xff260000`（STG）・`0xffd80000`
+  （事前調査でもう一つのリスクとして挙げた PMU_GLOBAL）付近の "Unassigned mem"・
+  外部アボートに類する記録は**一切無い**（`gic_dist_writeb: Bad offset ...` という
+  GIC ディストリビュータへのバイト単位アクセス警告のみで、非致命的）。
+
+  **実際に「バナーが1行も出ない」原因は別にあった**：本ターゲットは
+  `USE_XUART1`（`target.cmake:83`、`Makefile.target:100-115` 由来）でコンソールを
+  UART1（`0xFF010000`）に出す。QEMU の `hw/arm/xlnx-zynqmp.c`（`uart_addr =
+  {0xFF000000, 0xFF010000}`、`serial_hd(i)` を `uart[i]` に割り当て）は `-serial` 引数の
+  **個数**でどの UART にどのチャデブを繋ぐか決まるため、`-serial mon:stdio` を1個しか
+  渡さないと index0＝UART0 に接続され、カーネルが実際に書き込む UART1 にはバックエンドが
+  無くコンソール出力が**エラーも出さず黙って消える**（QEMU は UART1 自体はハードウェアとして
+  正しく実装しているため `guest_errors` にも `unimp` にも掛からない）。`-serial null -serial
+  mon:stdio`（UART0=null, UART1=mon:stdio）に直したところ、1コア・4コアとも
+  `TOPPERS/FMP3 Kernel Release 3.4.0 for KR260 ...` のバナー・`Processor 1..4 start.`
+  （4コアは4行）・サンプルタスクの周期出力まで到達することを確認した。
+
+  加えて、`target.cmake` の `QEMU_SYSTEM_AARCH64_KRIA` の既定パス
+  （`/home/honda/qemu-build/install/bin/qemu-system-aarch64`）も実機には存在せず
+  （`install/bin` には musca_b1 用の `qemu-system-arm` のみがインストール済みで、
+  aarch64 の 11.0.1 バイナリはビルドツリー `qemu-11.0.1/build-a64/` に置かれたまま
+  未インストールだった）、無指定だと PATH 上の QEMU 8.2.2 にフォールバックしていた。
+  ビルドツリーのパスも候補に加えるよう修正した。
+
+  以上2件を `target/kria_arm64_gcc/target.cmake`（derived、pristine ではない）で
+  修正した：(1) `-serial mon:stdio` → `-serial null -serial mon:stdio`、
+  (2) `QEMU_SYSTEM_AARCH64_KRIA` の既定探索候補に `qemu-11.0.1/build-a64/
+  qemu-system-aarch64` を追加。**`chip_kernel_impl.c` 等 pristine 側は一切変更していない**
+  （`TOPPERS_USE_QEMU` ガードは不要と判断・未追加）。4コア構成（PMU_GLOBAL 経由の
+  secondary core 起動）についても、同じ実測で `Processor 1/2/3/4 start.` の4行が
+  問題なく出力されることを確認済みで、事前調査が挙げたもう一つのリスク
+  （PMU_GLOBAL ポーリング）も実害としては顕在化しなかった。
+
 ## 未解決事項（強い証拠はあるが断定はしない）
 
 - **（2026-07-19 発見）`target/musca_b1_gcc/target_timer.c` の `hrt_clear_event_body()`
