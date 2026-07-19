@@ -1,6 +1,6 @@
 # AGENTS.md — fmp3_core 操作の正本
 
-FMP3 の派生版（CMake 一本化 + Python cfg、TECS レス）。上流 pristine は `fmp3_archive` から
+FMP3 の派生版（CMake 一本化 + Python cfg）。上流 pristine は `fmp3_archive` から
 **方式B（vendor import）**で取り込み、in-place 編集＋乖離台帳で管理する。まずこの文書に従うこと。
 
 ---

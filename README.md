@@ -1,6 +1,6 @@
 # fmp3_core
 
-TOPPERS/FMP3  をベースに **CMake 一本化 + Python cfg + TECS レス**へ再構成した派生版（`asp3_core` の FMP3 版）。
+TOPPERS/FMP3 をベースに **CMake 一本化 + Python cfg** へ再構成した派生版（`asp3_core` の FMP3 版）。
 
 - 上流 pristine：[`fmp3_archive`](../FMP3/fmp3_archive)（方式B: vendor import で取り込み）
 - 取り込み手順・運用の正本：[AGENTS.md](AGENTS.md)
