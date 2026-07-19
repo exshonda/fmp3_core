@@ -119,10 +119,32 @@ unset(_fmp3_kria_r5_qemu_default)
 #  ★boot-cpu=rpu-cpu[0] でRPU0を電源ON，mp-affinity=0で実機同様Aff0=0．
 #  ★cpu-num=4：グローバルCPU index（A53が0-3、RPUが4,5）でRPU0を指す．
 #
-set(FMP3_RUN_COMMAND
-    ${QEMU_SYSTEM_AARCH64_KRIA_R5} -M xlnx-zcu102 -smp 6 -m 2G -nographic
-    -global xlnx-zynqmp.boot-cpu=rpu-cpu[0]
-    -global cortex-r5f-arm-cpu.mp-affinity=0
-    -device loader,file=$<TARGET_FILE:fmp>,cpu-num=4
-    -serial null -serial mon:stdio
-)
+#  ★2コア（split mode, FMP3_PRC_NUM=2）は上記の1コア用コマンドでは動かない
+#    （DIVERGENCE_MAP.md「解消済み事項」kria_r5_gcc QEMU実行検証の節を参照）。
+#    QEMU の xlnx-zynqmp.c は boot-cpu に指定されなかった RPU を既定で
+#    start-powered-off=true にするため，RPU1（PRC2）が起動せず，
+#    barrier_sync() で PRC1 が無期限に停止する（バナー0行の無反応ハング）。
+#    `-global xlnx-zynqmp.rpu-secondary-start=true` を立てて RPU1 を
+#    reset から同時起動させ，cpu-num=5 の -device loader で RPU1 に
+#    同じイメージを積む必要がある（kria_arm64/target.cmake の
+#    FMP3_PRC_NUM 分岐と同じ形）。
+#
+if(FMP3_PRC_NUM STREQUAL "2")
+    set(FMP3_RUN_COMMAND
+        ${QEMU_SYSTEM_AARCH64_KRIA_R5} -M xlnx-zcu102 -smp 6 -m 2G -nographic
+        -global xlnx-zynqmp.boot-cpu=rpu-cpu[0]
+        -global xlnx-zynqmp.rpu-secondary-start=true
+        -global cortex-r5f-arm-cpu.mp-affinity=0
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=4
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=5
+        -serial null -serial mon:stdio
+    )
+else()
+    set(FMP3_RUN_COMMAND
+        ${QEMU_SYSTEM_AARCH64_KRIA_R5} -M xlnx-zcu102 -smp 6 -m 2G -nographic
+        -global xlnx-zynqmp.boot-cpu=rpu-cpu[0]
+        -global cortex-r5f-arm-cpu.mp-affinity=0
+        -device loader,file=$<TARGET_FILE:fmp>,cpu-num=4
+        -serial null -serial mon:stdio
+    )
+endif()

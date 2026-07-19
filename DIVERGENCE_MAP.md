@@ -20,6 +20,19 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | arch/arm_m_gcc/musca_b1/chip_kernel.py | add | musca_b1 chip 層。前例なし・全数新規（`fmp3_pico_sdk` に musca_b1 は無い）。計画B | - |
 | target/polarfire_soc_kit_gcc/*.py（3個） | add | polarfire ターゲット層。前例なし・全数新規。計画B | - |
 | target/musca_b1_gcc/*.py（3個） | add | musca_b1 ターゲット層。前例なし・全数新規。`target_kernel.py` は3.4.0で `core_kernel.trb` から移動してきたベクタテーブル／例外テーブル生成ロジックを含む。計画B | - |
+| target/rp2350_pico2_gcc/{target.cmake,presets.json} | add | Makefile.target の CMake 版。ARM-M（arm_m_gcc/rp2350 chip 層）。QEMU に RP2350/Pico のマシンモデルが無い（8.2.2/11.0.1 とも `-machine help` で確認済み）ため `FMP3_RUN_COMMAND` は定義しない＝`run` ターゲット自体を生成しない（ビルド専用、意図的）。計画C Task 1 | - |
+| arch/arm_m_gcc/rp2350/{chip.cmake,chip_kernel.py} | add | rp2350 chip 層。前例なし・全数新規（`fmp3_pico_sdk` に rp2350 は無い）。計画C Task 1 | - |
+| target/rp2350_pico2_gcc/*.py（3個: target_check.py/target_class.py/target_kernel.py） | add | rp2350 ターゲット層。`target_class.py` は musca_b1 版とバイト同一で流用（クラス構造がARM-M共通のため）。計画C Task 1 | - |
+| target/kria_arm64_gcc/{target.cmake,presets.json} | add | Makefile.target の CMake 版（KRIA SOM Cortex-A53、QEMU xlnx-zcu102）。QEMU の `-serial` 割当ての罠（USE_XUART1でUART1へ出力するがserial個数指定を誤るとUART0へ繋がり出力が無音で消える）を踏まえ `-serial null -serial mon:stdio` を使用。4コア構成のsecondary-core起動もQEMU 11.0.1で確認済み。計画C Task 6/7 | - |
+| arch/arm64_gcc/common/arch.cmake | add | Makefile.core の CMake 版。**ROM イメージ形式フック（`FMP3_DUMP_FORMAT dump`）をここで宣言**（Makefile.core:34 `DUMP = dump` の翻訳。kria_arm64 は `.dump` 形式）。計画C Task 6 | - |
+| arch/arm64_gcc/common/*.py（4個: core_check.py/core_kernel.py/core_offset.py/gic_kernel.py） | add | arm64_gcc コア共通層の Python テンプレート。前例なし・全数新規移植（asp3_core に arm64/GIC 実装なし）。計画C Task 4 | - |
+| arch/arm64_gcc/zynqmp/{chip.cmake,chip_kernel.py} | add | kria_arm64 chip 層（ZynqMP APU/Cortex-A53）。前例なし・全数新規。計画C Task 4/6 | - |
+| target/kria_arm64_gcc/*.py（3個: target_check.py/target_class.py/target_kernel.py） | add | kria_arm64 ターゲット層。前例なし・全数新規。計画C Task 7 | - |
+| target/kria_r5_gcc/{target.cmake,presets.json} | add | Makefile.target の CMake 版（KRIA SOM Cortex-R5F、QEMU xlnx-zcu102 RPUクラスタ）。1コア（lockstep相当）・2コア（split mode, `FMP3_PRC_NUM=2`）を`FMP3_PRC_NUM`で分岐（kria_arm64と同じ形）。2コアの`FMP3_RUN_COMMAND`は`-global xlnx-zynqmp.rpu-secondary-start=true`と`-device loader`2個を要する（Task 12で判明、Task 13で`target.cmake`に反映。詳細は下記「解消済み事項」参照）。計画C Task 10/13 | - |
+| arch/arm_gcc/common/arch.cmake | add | Makefile.core の CMake 版。本ファイルに `DUMP` の定義は無い（現物確認済み）ため `FMP3_DUMP_FORMAT` は宣言せず既定の srec のまま（kria_r5 は srec のまま正しい）。計画C Task 8 | - |
+| arch/arm_gcc/common/*.py（3個: core_check.py/core_kernel.py/core_offset.py） | add | arm_gcc（Cortex-R5F/GIC）コア共通層の Python テンプレート。前例なし・全数新規移植。計画C Task 8 | - |
+| arch/arm_gcc/zynqmp_r5/{chip.cmake,chip_kernel.py} | add | kria_r5 chip 層（ZynqMP RPU/Cortex-R5F）。`chip_kernel.py` はプライベート割込み（intno 0〜31）のみプロセッサ番号で符号化する（`(prcid << 16) | intno`）構造（グローバル割込み32〜186はintno自体は符号化しない）。前例なし・全数新規。計画C Task 8/10 | - |
+| target/kria_r5_gcc/*.py（3個: target_check.py/target_class.py/target_kernel.py） | add | kria_r5 ターゲット層。前例なし・全数新規。計画C Task 10 | - |
 
 種別: add=追加 / patch=部分改変 / replace=置換 / remove=削除 / none=無改変（差分ゼロだが，
 運用上の注意が必要なため記録目的で本表に載せている。現状 `cfg/` のみ）
@@ -79,24 +92,6 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
   `clsid` の意味的な正しさは `tools/cfg_error_tests/`（警告メッセージ経由の文言比較）で
   部分的に補っているが、`cfg_equivalence.sh` 単体の「一致」は `clsid` については無検証である
   ことを踏まえて読むこと。
-
-- **（2026-07-19 外部レビュー指摘）`kria_arm64_gcc` を将来追加する際は ROM イメージ形式の
-  フックが要る。** 現物を確認した：上流 `arch/arm64_gcc/common/Makefile.core:34` は
-  `DUMP = dump` と定義し（他アーキではこの変数は既定で `sample/Makefile:133-134` の
-  `ifndef DUMP: DUMP = srec` が効く）、`sample/Makefile` 側は `cfg1_out.$(DUMP)` という
-  拡張子可変のファイル名で kernel_cfg 生成（`:402-406` 相当）・offset.h 生成（`:417-421` 相当）
-  の両方の `--rom-image` 引数を切り替え、`cfg1_out.dump:` ルール（`$(OBJDUMP) -s $(DUMPOPTS)
-  $(CFG1_OUT) > cfg1_out.dump`）が `.dump` 生成を担う。kria は `DUMPOPTS := -j .text -j
-  .rodata` を使う。一方 CMake 汎用層（`CMakeLists.txt`）はこの可変性を持たず、
-  `-O srec`／`.srec` 拡張子を決め打ちしている（`cfg1_out.srec` 生成: `:361-366`、
-  offset.h 生成の `--rom-image`: `:418-420`、`fmp3_cfg_check()` の `--rom-image`:
-  `:538-543`。いずれも実際にこの3箇所であることをこの修正時に確認済み）。
-  受け側の `cfg_py/srecord.py`／`cfg_py/cfg.py:700-705` は `args.rom_image_file_name` の
-  拡張子が `.srec` かどうかで `SRecord(..., "srec")` と `SRecord(..., "dump")` を切り替える
-  実装が既にあり、**欠けているのは CMake 層の DUMP 変数フック（`objcopy -O srec` /
-  `objdump -s` の分岐と `--rom-image` の拡張子切り替え）だけ**である。現5ターゲット
-  （polarfire・musca_b1×2）はいずれも `srec` 系のみを使うため無害。kria_arm64_gcc を
-  実装する時点で対応すること。
 
 - **（2026-07-19 外部レビュー指摘）コンパイルオプションの結合順が上流と逆。** 現物を確認した：
   上流 `sample/Makefile:188` は `COPTS := -O2 $(COPTS)`（`-O2` を**先頭に**追加し、
@@ -299,6 +294,71 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
   してから configure・build し直し，全て configure rc=0・build rc=0・`fmp`
   生成物ありを確認した（regression無し）。
 
+- **（2026-07-19 解消／Task 13）上記「2コア用の `cmake --build ... --target run` を
+  今後整備する場合」の対応を実施した。** `target/kria_r5_gcc/target.cmake` の
+  `FMP3_RUN_COMMAND` を `FMP3_PRC_NUM STREQUAL "2"` で分岐させ（`kria_arm64_gcc/
+  target.cmake` の `FMP3_PRC_NUM` 分岐と同じ形）、2コア側に
+  `-global xlnx-zynqmp.rpu-secondary-start=true` と `-device loader` 2個
+  （`cpu-num=4`／`cpu-num=5`）を積んだ。修正後 `cmake --build build/kria_r5-2core
+  --target run`（`timeout -k 5 25`）を実測：`Processor 1 start.` / `Processor 2 start.`
+  の2行、`TASK1_1`/`TASK2_1` の周期出力が130行（20秒）、`rc=124`（タイムアウトに
+  よる正常継続）、残存QEMUプロセス無しを確認した。修正前（1コア用の
+  `FMP3_RUN_COMMAND` がそのまま `kria_r5-2core` にも使われていた状態）で
+  バナー0行のまま `rc=124`（無反応のハング）になることは Task 12 が実測済み
+  （上記ブロック）であり、本修正はその際に Task 12 自身が「今後整備する場合の
+  対応」として書き残した変更点をそのまま適用したもの。**Task 13 では修正前の
+  状態への revert-and-retest は行っていない**（Task 12 の実測記録を根拠として
+  採用し，修正後の動作のみを新規に実測した。この点は推測ではなく，実施しな
+  かったことの明示）。`target.cmake` は derived ファイル（pristine ではない）
+  のため pristine 側の改変は無く、`target_kernel_impl.c` 等は無改変のまま。
+
+- **（2026-07-19 解消／Task 13）`kria_r5` 用の `E_RSATR` エラーテスト variant
+  （Task 11 が「follow-up gap」として未着手のまま残していたもの）を新規作成した。**
+  `tools/cfg_error_tests/kria_r5_e_rsatr_intno_affinity.cfg`：`arch/arm_gcc/
+  zynqmp_r5/chip_kernel.py:15-31` が「プライベート」割込み（intno 0〜31）だけを
+  `(prcid << 16) | intno` でプロセッサ番号に符号化する構造を踏まえ、既存の
+  IPI dispatch 用（intno 0〜3）と衝突しない未使用のプライベート範囲 intno=20 を
+  選び、`CLS_PRC1`（割付け可能PRC1のみ）の囲みの中で PRC2 用に符号化された
+  `(2 << 16) | 20` を `CFG_INT` することで、musca_b1/rp2350 の既存 variant と
+  同型の affinity 不整合を作った。`kria_r5-2core` に対して実行し，
+  ruby/python 両エンジンで `E_RSATR`（メッセージ文言も IDENTICAL）を確認
+  （`tools/cfg_error_tests/run.sh build/kria_r5-2core \
+  tools/cfg_error_tests/kria_r5_e_rsatr_intno_affinity.cfg "E_RSATR"` → exit=0）。
+  negative control として `kria_r5`（1コア）に対して同じ `.cfg` を実行すると
+  `E_PAR`（`INTNO_VALID[2]` 自体が存在しないため）になることも確認した
+  （同コマンドの第3引数を `"E_PAR"` に変えて exit=0）。`tools/` は derived
+  ファイルのため `DIVERGENCE_MAP.md` への記録義務は無いが，pristine の
+  構造理解（chip_kernel.py の符号化ルール）に基づくテスト資産のため記録目的で
+  ここに残す。
+
+- **（2026-07-19 解消／Task 6・7・13）`kria_arm64_gcc` を追加する際に必要になった
+  ROM イメージ形式フック（`FMP3_DUMP_FORMAT`）は Task 6/7 で
+  `arch/arm64_gcc/common/arch.cmake` に実装済みだったが，同じ問題が
+  `musca_b1_gcc`／`rp2350_pico2_gcc`（どちらも `arch/arm_m_gcc` コア共通層）
+  にも存在することは「対処しない事項」として記録されたまま Task 13 まで
+  未対応だった。** Task 13 で現物を再確認した：`arch/arm_m_gcc/common/
+  Makefile.core:31` は `arch/arm64_gcc/common/Makefile.core:34` と同じ
+  無条件代入 `DUMP = dump` を持つ（`sample/Makefile:133-134` の
+  `ifndef DUMP: DUMP = srec` を include 順で後から上書きする、同一の理屈）。
+  `arch/arm_m_gcc/common/arch.cmake` に `set(FMP3_DUMP_FORMAT dump)` を追加し
+  （`arch/arm64_gcc/common/arch.cmake` と同じ場所・同じ書式）、`musca_b1_gcc`／
+  `musca_b1-2core`／`rp2350_pico2_gcc` を srec から dump へ切り替えた。
+  DUMPOPTS：`musca_b1_gcc`／`rp2350_pico2_gcc` の `Makefile.target` は
+  `DUMPOPTS` を定義しない（`kria_arm64_gcc` のみ定義。現物確認済み）ため，
+  上流でもフィルタ無し（全セクション）の `objdump -s` になる。CMake 汎用層は
+  `FMP3_DUMPOPTS` 未定義時に既定で空文字列（`CMakeLists.txt:96-97`）にするため，
+  ここで何も宣言しなければ上流と同じ挙動になる（実際に何も宣言していない）。
+  影響確認：`rm -rf build/{musca_b1,musca_b1-2core,rp2350_pico2}` からの
+  クリーンビルドで `generated/cfg1_out.dump`（`.srec` ではない）が生成される
+  ことを確認し，`tools/cfg_equivalence.sh`（拡張子 `srec`／`dump` を自動判定，
+  Task 6 で既に両対応済み）・`tools/cfg_error_tests/run.sh`（同じく Task 7 で
+  両対応済み）を実行し，3構成とも exit=0（MATCH／RESULT=OK）を確認した。
+  `kria_r5_gcc`（`arch/arm_gcc` コア共通層）は `arch/arm_gcc/common/
+  Makefile.core` に `DUMP` の定義自体が無いことを確認済み（Task 8）のため対象外
+  ＝現状の srec のままで正しい。全6ターゲットのROMイメージ形式は
+  上流Makefileの実際の挙動と一致した：srec = polarfire・kria_r5、
+  dump = musca_b1×2・rp2350・kria_arm64×2。
+
 ## 未解決事項（強い証拠はあるが断定はしない）
 
 - **（2026-07-19 発見）`target/musca_b1_gcc/target_timer.c` の `hrt_clear_event_body()`
@@ -322,6 +382,19 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
   **上流のバグと断定はせず**、`hrt_clear_event_body()` の「クリア」の意図
   （SysTick に真の無期限停止手段が無いことへの次善策か、見落としか）を上流に確認したい
   未解決事項として記録する。pristine は未改変（調査は既存のビルド成果物の実行のみで行った）。
+
+- **（2026-07-19 発見・未調査／Task 13）`kria_r5-2core` の QEMU 実行でも、上記と同型に
+  見える `LOG_NOTICE("no time event is processed in hrt interrupt on PRC%d.")` が
+  観測された。** ただし出力されるプロセッサが**PRC1**である点が musca_b1（PRC2）と
+  逆である。Task 13 の Step 4 回帰確認（`cmake --build build/kria_r5-2core --target run`、
+  `timeout -k 5 25`、20秒分の出力）で7回観測した（すべて `on PRC1.`）。musca_b1 は
+  ARM-M の SysTick（`target_timer.c`）、kria_r5 は ZynqMP の TTC（`ttc_hrt.c`）と
+  実装するハードウェアタイマが異なり、`hrt_clear_event_body()` 相当の実装が同じ機序を
+  持つかどうかは**未確認**（コードは読んでいない）。カーネルは20秒間 PRC1/PRC2 双方の
+  `TASK1_1`/`TASK2_1` 周期出力を継続しており（130行）、致命的でないことは実測で確認したが、
+  根本原因の調査はTask 13のスコープ外（本タスクの4件の既知欠陥のいずれにも該当しない）
+  のため行っていない。**事実（7回・PRC1・非致命的）と、musca_b1と「同型かもしれない」という
+  推測は分けて記録する**。pristine は未改変（調査は既存のビルド成果物の実行のみで行った）。
 
 ## 期限付きの逸脱
 

@@ -11,6 +11,28 @@
 set(COREDIR ${FMP3_ROOT_DIR}/arch/arm_m_gcc/common)
 set(TOOLDIR ${FMP3_ROOT_DIR}/arch/gcc)
 
+#
+#  ROM イメージ形式（Makefile.core:31  DUMP = dump）．
+#
+#  ★Task 6/7（kria_arm64_gcc・arch/arm64_gcc/common/arch.cmake:20-37）で
+#    「本ファイル（arm_m_gcc/common/Makefile.core:31）にも同じ無条件代入
+#    `DUMP = dump` があり，musca_b1_gcc / rp2350_pico2_gcc も本来は dump
+#    形式になるはずだが，それらの target.cmake は FMP3_DUMP_FORMAT を
+#    宣言しておらず現状 srec のまま」という懸念が報告されたまま未対応
+#    だった（DIVERGENCE_MAP.md 参照）。Task 13 で現物（本ファイル31行目）
+#    を再確認し，arm64_gcc と同じ理由（sample/Makefile:133-134 の
+#    `ifndef DUMP: DUMP = srec` を，include 順で後に読まれる本行が無条件
+#    代入で上書きする）で同一の乖離だと判断し，ここで解消する。
+#
+#  ★DUMPOPTS: musca_b1_gcc / rp2350_pico2_gcc の Makefile.target は
+#    DUMPOPTS を定義しない（kria_arm64_gcc とは異なる。現物確認済み）ため，
+#    上流でも `objdump -s`（セクション指定なし＝全セクション）になる。
+#    CMake 汎用層は FMP3_DUMPOPTS 未定義時に既定で空文字列
+#    （CMakeLists.txt:96-97）にするため，ここで何も宣言しなければ上流と
+#    同じ「フィルタ無し」の dump になる。
+#
+set(FMP3_DUMP_FORMAT dump)
+
 #  Makefile.core:25
 list(APPEND FMP3_INCLUDE_DIRS
     ${COREDIR}
