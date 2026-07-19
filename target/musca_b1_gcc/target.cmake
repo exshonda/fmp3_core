@@ -61,9 +61,9 @@ set(FMP3_LDSCRIPT ${TARGETDIR}/musca_b1.ld)
 #  cfg に渡すファイル
 #
 list(APPEND FMP3_CFG_FILES            ${TARGETDIR}/target_kernel.cfg)
-list(APPEND FMP3_CLASS_TRB_FILES      ${TARGETDIR}/target_class.trb)
-list(APPEND FMP3_KERNEL_CFG_TRB_FILES ${TARGETDIR}/target_kernel.trb)
-list(APPEND FMP3_CHECK_TRB_FILES      ${TARGETDIR}/target_check.trb)
+list(APPEND FMP3_CLASS_TRB_FILES      ${TARGETDIR}/target_class.py)
+list(APPEND FMP3_KERNEL_CFG_TRB_FILES ${TARGETDIR}/target_kernel.py)
+list(APPEND FMP3_CHECK_TRB_FILES      ${TARGETDIR}/target_check.py)
 
 #
 #  チップ依存部（Makefile.target:48）

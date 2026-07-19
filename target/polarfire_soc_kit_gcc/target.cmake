@@ -109,9 +109,9 @@ list(APPEND FMP3_SDK_ASM_FILES
 #  cfg に渡すファイル（sample/Makefile:309-319 の TARGET_*_TRB / _CFG）
 #
 list(APPEND FMP3_CFG_FILES            ${TARGETDIR}/target_kernel.cfg)
-list(APPEND FMP3_CLASS_TRB_FILES      ${TARGETDIR}/target_class.trb)
-list(APPEND FMP3_KERNEL_CFG_TRB_FILES ${TARGETDIR}/target_kernel.trb)
-list(APPEND FMP3_CHECK_TRB_FILES      ${TARGETDIR}/target_check.trb)
+list(APPEND FMP3_CLASS_TRB_FILES      ${TARGETDIR}/target_class.py)
+list(APPEND FMP3_KERNEL_CFG_TRB_FILES ${TARGETDIR}/target_kernel.py)
+list(APPEND FMP3_CHECK_TRB_FILES      ${TARGETDIR}/target_check.py)
 
 #
 #  チップ依存部

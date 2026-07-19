@@ -156,23 +156,24 @@ message(STATUS "fmp3_core: FMP3_LINK_OPTIONS = ${FMP3_LINK_OPTIONS}")
 #  コンフィギュレータの起動コマンド
 #
 #  CMake が呼ぶのは常に cfg_py/cfg.py だけ（AGENTS.md §2 規則3）。
-#  ★計画Aの間，cfg_py/cfg.py は pristine の cfg/cfg.rb へ委譲する薄い
-#    シムである（Task 3）。CMake から見た呼び先は計画Bでも変わらない
-#    ため，このパイプラインは計画Bでそのまま残る。
-#    計画Bで cfg_py/ の中身を asp3_core 1.7.1 の本物のエンジンに
-#    差し替える。DIVERGENCE_MAP.md の「期限付きの逸脱」参照。
+#  ★計画B Task 11（cutover）で，cfg_py/ の中身は asp3_core 1.7.1 の
+#    本物の Python cfg エンジン（旧 cfg_py/engine_next/）へ昇格した。
+#    計画Aの間の「pristine cfg/cfg.rb への委譲シム」はここでは終わり，
+#    以後 CMake からは pristine の cfg/*.rb を一切参照しない。
+#    Ruby（cfg/cfg.rb 一式）は tools/cfg_equivalence.sh がオラクルとして
+#    呼ぶ以外に用途は無い。DIVERGENCE_MAP.md の「期限付きの逸脱」は
+#    Task 12 で解消記録を追記する。
 #
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(CFG_COMMAND ${Python3_EXECUTABLE} -B ${FMP3_ROOT_DIR}/cfg_py/cfg.py)
 set(CFG_SCRIPT_DEPS
     ${FMP3_ROOT_DIR}/cfg_py/cfg.py
-    ${FMP3_ROOT_DIR}/cfg/cfg.rb
-    ${FMP3_ROOT_DIR}/cfg/pass1.rb
-    ${FMP3_ROOT_DIR}/cfg/pass2.rb
-    ${FMP3_ROOT_DIR}/cfg/GenFile.rb
-    ${FMP3_ROOT_DIR}/cfg/SRecord.rb
+    ${FMP3_ROOT_DIR}/cfg_py/pass1.py
+    ${FMP3_ROOT_DIR}/cfg_py/pass2.py
+    ${FMP3_ROOT_DIR}/cfg_py/gen_file.py
+    ${FMP3_ROOT_DIR}/cfg_py/srecord.py
 )
-message(STATUS "fmp3_core: cfg = cfg_py/cfg.py (Plan-A shim -> pristine cfg/cfg.rb)")
+message(STATUS "fmp3_core: cfg = cfg_py/cfg.py (asp3_core 1.7.1 engine, Plan-B)")
 
 #
 #  cfg 共通の定義

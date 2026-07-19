@@ -24,7 +24,7 @@ list(APPEND FMP3_SYMVAL_TABLES
 
 #  Makefile.core:48  TARGET_OFFSET_TRB
 list(APPEND FMP3_OFFSET_TRB_FILES
-    ${COREDIR}/core_offset.trb
+    ${COREDIR}/core_offset.py
 )
 
 #  Makefile.core:37-38  KERNEL_ASMOBJS core_support.o / KERNEL_COBJS

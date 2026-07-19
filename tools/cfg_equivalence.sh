@@ -47,6 +47,14 @@ extract_cmd() {
 
 #  1コマンド文字列を engine 種別に応じて変換して実行する。
 #    kind = ruby | python
+#
+#  ★計画B Task 11（cutover）以降、CMake が実際に発行するコマンド
+#    （extract_cmd で取り出す ${cmd}）は cfg_py/cfg.py（本物の Python
+#    エンジン）を指し、-T/-C 引数も .py パスになっている（target.cmake /
+#    arch.cmake が .py を積むようになったため）。したがって：
+#      - python 側はそのまま実行すればよい（変換不要）。
+#      - ruby 側は逆に .py → .trb へ変換してから pristine cfg/cfg.rb
+#        （オラクル）へ渡す必要がある（cutover 前はこの逆だった）。
 run_cmd() {
     local kind="$1" cmd="$2" outdir="$3"
     # "cd <dir> && python3 -B <root>/cfg_py/cfg.py <args...> [&& <post>]" の
@@ -54,14 +62,14 @@ run_cmd() {
     local args
     args="$(echo "${cmd}" | sed -E 's#^.*cfg_py/cfg\.py##; s# && .*$##')"
     if [ "${kind}" = "ruby" ]; then
-        ( cd "${outdir}" && ruby "${ROOT}/cfg/cfg.rb" ${args} )
-    else
-        # -T/-C 引数の .trb を .py に置換して Python エンジン呼び出しへ渡す。
+        # -T/-C 引数の .py を .trb に置換して Ruby オラクル呼び出しへ渡す。
         # --rom-symbol/--rom-image の絶対パスはそのまま（両パイプライン共通で
         # BUILD_DIR/generated 配下の既存 .syms/.srec を参照する。後述コメント参照）。
-        local pyargs
-        pyargs="$(echo "${args}" | sed -E 's#(-[TC] [^ ]+)\.trb#\1.py#g')"
-        ( cd "${outdir}" && python3 -B "${ROOT}/cfg_py/engine_next/cfg.py" ${pyargs} )
+        local rbargs
+        rbargs="$(echo "${args}" | sed -E 's#(-[TC] [^ ]+)\.py#\1.trb#g')"
+        ( cd "${outdir}" && ruby "${ROOT}/cfg/cfg.rb" ${rbargs} )
+    else
+        ( cd "${outdir}" && python3 -B "${ROOT}/cfg_py/cfg.py" ${args} )
     fi
 }
 

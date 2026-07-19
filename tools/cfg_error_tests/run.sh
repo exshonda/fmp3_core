@@ -89,7 +89,7 @@ run_pass1() {
         ( cd "${outdir}" && ruby "${ROOT}/cfg/cfg.rb" ${PASS1_ARGS_TEST} ) \
             > "${outdir}/pass1.log" 2>&1
     else
-        ( cd "${outdir}" && python3 -B "${ROOT}/cfg_py/engine_next/cfg.py" ${PASS1_ARGS_TEST} ) \
+        ( cd "${outdir}" && python3 -B "${ROOT}/cfg_py/cfg.py" ${PASS1_ARGS_TEST} ) \
             > "${outdir}/pass1.log" 2>&1
     fi
 }
@@ -205,15 +205,20 @@ if [ -z "${KCFG_RAW}" ]; then
 fi
 KCFG_ARGS="$(echo "${KCFG_RAW}" | sed -E 's#^.*cfg_py/cfg\.py##; s# && .*$##')"
 
+#  ★計画B Task 11（cutover）以降、KCFG_ARGS（実ninjaコマンドから抽出）は
+#    .py パスを含む（target.cmake/arch.cmake が .py を積むようになった
+#    ため）。python 側はそのまま実行し、ruby 側は逆に .py→.trb へ変換
+#    してから pristine cfg/cfg.rb（オラクル）へ渡す（cutover前はこの逆
+#    だった。tools/cfg_equivalence.sh の run_cmd と同じ理由）。
 run_pass2() {
     local kind="$1" outdir="$2"
     if [ "${kind}" = "ruby" ]; then
-        ( cd "${outdir}" && ruby "${ROOT}/cfg/cfg.rb" ${KCFG_ARGS} ) \
+        local rbargs
+        rbargs="$(echo "${KCFG_ARGS}" | sed -E 's#(-[TC] [^ ]+)\.py#\1.trb#g')"
+        ( cd "${outdir}" && ruby "${ROOT}/cfg/cfg.rb" ${rbargs} ) \
             > "${outdir}/kernel_cfg.log" 2>&1
     else
-        local pyargs
-        pyargs="$(echo "${KCFG_ARGS}" | sed -E 's#(-[TC] [^ ]+)\.trb#\1.py#g')"
-        ( cd "${outdir}" && python3 -B "${ROOT}/cfg_py/engine_next/cfg.py" ${pyargs} ) \
+        ( cd "${outdir}" && python3 -B "${ROOT}/cfg_py/cfg.py" ${KCFG_ARGS} ) \
             > "${outdir}/kernel_cfg.log" 2>&1
     fi
 }
