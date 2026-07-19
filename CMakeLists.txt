@@ -529,6 +529,44 @@ function(fmp3_cfg_check TARGET)
             "within fmp3_core's own CMakeLists.txt (guarded by NOT FMP3_LIBRARY_ONLY); "
             "this guard exists in case that changes.")
     endif()
+    #  ★外部レビューで指摘・現物で裏取り済み：FMP3_ROOT_DIR のガードだけでは
+    #  不十分。CFG_GEN_DIR / PASS3_ARGS は fmp3_core 自身の CMakeLists.txt
+    #  の「このファイルのディレクトリスコープ」で set() された変数であり
+    #  （function() は呼び出し側スコープで変数解決する — fmp3_add_syssvc()
+    #  の FMP3_ROOT_DIR と同じ CMake 変数スコープの話だが，こちらは
+    #  「呼び出し側が事前に set() すれば直る」性質のものではない：値の中身
+    #  （CFG_COMMAND や PASS3_ARGS の各引数）は fmp3_core 自身のディレクトリ
+    #  スコープでしか組み立てられない）。外部 SDK が add_subdirectory() の
+    #  外（呼び出し側スコープ）から fmp3_cfg_check(app) を直接呼ぶと，
+    #  FMP3_ROOT_DIR は（呼び出し側が事前に set() していれば）空でなくガード
+    #  を通過するのに，CFG_GEN_DIR / PASS3_ARGS は呼び出し側スコープに存在
+    #  せず空文字列に展開され，WORKING_DIRECTORY と COMMAND が空になり
+    #  「--rom-symbol がコマンド名として扱われる」ような分かりにくい失敗に
+    #  なる（計画A2 Task 9 で fmp3_add_syssvc() 側は対処したが，同じ関数群の
+    #  fmp3_cfg_check() 側を見落としていた）。
+    #
+    #  正しい使い方：fmp3_cfg_check() は fmp3_core 自身の CMakeLists.txt の
+    #  中（このファイル）からのみ呼ぶこと。外部 SDK が自前の ELF に対して
+    #  pass3 相当を実行したい場合は，この関数を呼ぶのではなく，
+    #  FMP3_LIBRARY_ONLY=ON 時に PARENT_SCOPE export される
+    #  ${FMP3_PASS3_ARGS} / ${FMP3_CFG_GEN_DIR}（:560-561）を使って
+    #  自前の add_custom_command を組み立てること。
+    if(NOT CFG_GEN_DIR OR NOT PASS3_ARGS)
+        message(FATAL_ERROR
+            "fmp3_cfg_check(${TARGET}): CFG_GEN_DIR and/or PASS3_ARGS are empty in the "
+            "caller's scope. These are directory-scope variables local to fmp3_core's "
+            "own CMakeLists.txt, not exported under these names to a caller's scope "
+            "(unlike FMP3_ROOT_DIR, whose FMP3_ROOT_DIR guard above can pass even when "
+            "this one fails, if the caller pre-set FMP3_ROOT_DIR of its own accord -- "
+            "that combination is exactly what makes this failure confusing). "
+            "fmp3_cfg_check() is only meant to be called from within fmp3_core's own "
+            "CMakeLists.txt. If you are an external SDK that add_subdirectory()'d this "
+            "repository with FMP3_LIBRARY_ONLY=ON and want a pass-3 style check against "
+            "your own ELF, do NOT call fmp3_cfg_check() from your own scope; instead use "
+            "the PARENT_SCOPE-exported \${FMP3_PASS3_ARGS} / \${FMP3_CFG_GEN_DIR} "
+            "variables to build your own add_custom_command(), the same way this "
+            "function does internally.")
+    endif()
     add_custom_command(TARGET ${TARGET} POST_BUILD
         WORKING_DIRECTORY ${CFG_GEN_DIR}
         COMMAND ${CMAKE_COMMAND}
