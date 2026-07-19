@@ -89,9 +89,15 @@ if "INHNO_CREISR_VALID" not in globals():
 #
 #  全割込み番号／割込みハンドラ番号のリストを求める
 #
-INTNO_VALID_ALL = list(set(v for lst in INTNO_VALID.values() for v in lst))
-INTNO_CREISR_VALID_ALL = list(set(v for lst in INTNO_CREISR_VALID.values() for v in lst))
-INHNO_VALID_ALL = list(set(v for lst in INHNO_VALID.values() for v in lst))
+#  ★Ruby版（.values.flatten.uniq）は出現順を保存するが、list(set(...))は
+#  順序不定（DIVERGENCE_MAP.md「未解決事項」に記録していたもの。現状これら
+#  3つの変数はすべて `in` によるメンバーシップ判定にしか使われておらず
+#  （本ファイル中で grep 済み）実害は無いが、dict.fromkeys(...) で
+#  Rubyと同じ「出現順を保った重複除去」に揃えても副作用が無く安全なため、
+#  将来この変数を列挙生成に使い始めても事故らないようここで直しておく。
+INTNO_VALID_ALL = list(dict.fromkeys(v for lst in INTNO_VALID.values() for v in lst))
+INTNO_CREISR_VALID_ALL = list(dict.fromkeys(v for lst in INTNO_CREISR_VALID.values() for v in lst))
+INHNO_VALID_ALL = list(dict.fromkeys(v for lst in INHNO_VALID.values() for v in lst))
 
 #
 #  CFG_INTで使用できる割込み優先度のデフォルト定義
@@ -320,8 +326,19 @@ for _, params in sorted(cfgData["CRE_ISR"].items()):
         error_illegal("E_PAR", params, "isrpri")
 
     # intnoに対応するinhnoに対してDEF_INHがある場合（E_OBJ）
+    #
+    #  ★intnoが有効範囲外（E_PAR、:302）や、このクラスのaffinityPrcListに
+    #  含まれるプロセッサに対してintnoが無効（E_RSATR、:309-316）の場合でも
+    #  このループ自体は無条件に実行される（上のエラーチェックはcontinueせず
+    #  処理を継続するため）。そのため toInhnoVal[prcid] に
+    #  params["intno"].val がキーとして存在しないことがある。
+    #  Ruby版（cfg/interrupt.trb:376）は $toInhnoVal[prcid][...] が
+    #  Hashの欠損キー参照で nil を返し、続く has_key?(nil) が偽になって
+    #  素通りする（例外にならない）。dict[...] の直接参照はKeyErrorで
+    #  クラッシュし、後続の本来出るべき診断（E_OBJ等）を握り潰してしまう
+    #  ため、Rubyと同じ「無ければNone」の意味になる .get() を使う。
     for prcid in clsData[params["class"]]["affinityPrcList"]:
-        inhnoVal = toInhnoVal[prcid][params["intno"].val]
+        inhnoVal = toInhnoVal[prcid].get(params["intno"].val)
         if inhnoVal in cfgData["DEF_INH"]:
             error_ercd("E_OBJ", params,
                        f"%%intno in %apiname is duplicated "
