@@ -53,24 +53,6 @@
 #endif /* TNUM_PRCID >= 2 */
 
 /*
- *  PRC2（2コアSMP時）用の割込み定義．
- *
- *  Musca-B1（SSE-200）では NVIC はコアごとに独立したインスタンスであり，
- *  raise_int/probe_int/clear_int はいずれも自コアの NVIC_ISPR/ICPR を直接
- *  読み書きする（arch/arm_m_gcc/common/core_kernel_impl.h）．したがって，
- *  未接続の予備 IRQ60 は PRC1・PRC2 それぞれの NVIC で独立に「ソフトpend
- *  可能な予備割込み」として使えるため，PRC1 と同じ NVIC IRQ 番号を PRC2 用
- *  にも割り当ててよい．INTNO の上位16bitのプロセッサ番号タグにより，
- *  カーネルはこれをPRC2宛の割込みとして扱う．
- */
-#if TNUM_PRCID >= 2
-#define INTNO2			((2U << 16) | (60U + 16U))	/* PRC2, 予備NVIC IRQ60 → INTNO 76 */
-#define INTNO2_INTATR	TA_ENAINT
-#define INTNO2_INTPRI	(-2)
-#define intno2_clear()
-#endif /* TNUM_PRCID >= 2 */
-
-/*
  *  コア依存モジュール（ARM-M 用）
  */
 #include "core_test.h"
