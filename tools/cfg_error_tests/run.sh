@@ -33,7 +33,7 @@
 #                        コンパイル/リンク自体が失敗、等）
 #
 set -u
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 BUILD_DIR="${1:?usage: $0 <build-preset-dir> <error.cfg> [expected-substring] [extra-cflags]}"
 CFG="${2:?usage: $0 <build-preset-dir> <error.cfg> [expected-substring] [extra-cflags]}"
 EXPECT="${3:-}"
@@ -43,19 +43,27 @@ if [ ! -f "${BUILD_DIR}/build.ninja" ]; then
     echo "run.sh: ${BUILD_DIR}/build.ninja not found. configure first." >&2
     exit 2
 fi
-# ★実測で判明した罠: ninja -t commands は常に絶対パスでコマンドを出力する。
-# BUILD_DIR が相対パス（例: "build/polarfire_soc_kit-qemu"）のままだと、
-# 以下の sed パターン（${BUILD_DIR}/generated/cfg1_out.c 等の文字列一致）が
-# 絶対パスの実コマンドに一致せず、置換が「黙って」効かなくなる。その結果
-# コンパイル対象が指定した.cfgではなく実ビルドの古いcfg1_out.c（sample1.cfg
-# 由来）に差し替わり、E_RSATRを検出するはずが無関係のE_PARが出るなど、
-# 気付きにくい形で誤動作する（ここで一度実際に再現して原因を特定した）。
-BUILD_DIR="$(cd "${BUILD_DIR}" && pwd)"
+# ★実測で判明した罠: ninja -t commands は常に絶対パス（かつシンボリック
+# リンクを解決した「物理パス」）でコマンドを出力する。BUILD_DIR が相対パス
+# （例: "build/polarfire_soc_kit-qemu"）のままだと、以下の sed パターン
+# （${BUILD_DIR}/generated/cfg1_out.c 等の文字列一致）が絶対パスの実コマンド
+# に一致せず、置換が「黙って」効かなくなる。その結果コンパイル対象が指定した
+# .cfgではなく実ビルドの古いcfg1_out.c（sample1.cfg由来）に差し替わり、
+# E_RSATRを検出するはずが無関係のE_PARが出るなど、気付きにくい形で誤動作
+# する（ここで一度実際に再現して原因を特定した）。
+#
+# ★上記の対処として単純に絶対化（cd && pwd）しただけでは不十分だった：
+# この環境には /home/honda/TOPPERS/fmp3_core -> ./FMP3/fmp3_core という
+# symlink が実在し、symlink 経由の cwd で本スクリプトを起動すると
+# `pwd`（-P無し）は論理パス（symlinkを含んだパス）を返す。一方 ninja は
+# 常に物理パスを出力するため、論理パスの BUILD_DIR では上と同じ「黙った
+# 不一致」が symlink 経由でだけ再発する。`pwd -P` で物理パスに揃える。
+BUILD_DIR="$(cd "${BUILD_DIR}" && pwd -P)"
 if [ ! -f "${CFG}" ]; then
     echo "run.sh: cfg file not found: ${CFG}" >&2
     exit 2
 fi
-CFG_ABS="$(cd "$(dirname "${CFG}")" && pwd)/$(basename "${CFG}")"
+CFG_ABS="$(cd "$(dirname "${CFG}")" && pwd -P)/$(basename "${CFG}")"
 
 WORK="$(mktemp -d /tmp/cfgerr.XXXXXX)"
 RUBY_DIR="${WORK}/ruby"
@@ -133,10 +141,24 @@ if [ -z "${COMPILEB_RAW}" ]; then
     echo "run.sh: could not extract cfg1_out.c compile command" >&2
     exit 2
 fi
-COMPILEB_CMD="$(printf '%s\n' "${COMPILEB_RAW}" \
+#  ★修正1: 以下の各置換は「一致しなければ黙って何もしない」sedの性質上、
+#  一致しなかったことに気付かないまま古い成果物を使い続けてしまう罠がある
+#  （BUILD_DIRのsymlink不一致で実際に踏んだ。冒頭コメント参照）。各置換の
+#  前後を比較し、変化が無ければ「一致しなかった」ことの動かぬ証拠として
+#  異常終了する（WARNINGで済ませない）。
+COMPILEB_PRE="$(printf '%s\n' "${COMPILEB_RAW}" \
     | sed -E 's/ -MD -MT [^ ]+ -MF [^ ]+//' \
-    | sed -E "s#-o CMakeFiles/cfg1_out\.dir/generated/cfg1_out\.c\.obj#-o ${COMPILE_DIR}/cfg1_out.c.obj#" \
+    | sed -E "s#-o CMakeFiles/cfg1_out\.dir/generated/cfg1_out\.c\.obj#-o ${COMPILE_DIR}/cfg1_out.c.obj#")"
+COMPILEB_CMD="$(printf '%s\n' "${COMPILEB_PRE}" \
     | sed -E "s#-c ${BUILD_DIR}/generated/cfg1_out\.c#-c ${PY_DIR}/cfg1_out.c ${EXTRA_CFLAGS}#")"
+if [ "${COMPILEB_CMD}" = "${COMPILEB_PRE}" ]; then
+    echo "run.sh: FATAL: cfg1_out.c compile-command substitution did not match" \
+         "(BUILD_DIR='${BUILD_DIR}' not found verbatim in ninja's compile command;" \
+         "would silently compile the stale build's cfg1_out.c instead of this .cfg's" \
+         "output -- refusing to continue)" >&2
+    echo "  ninja command was: ${COMPILEB_PRE}" >&2
+    exit 2
+fi
 bash -c "${COMPILEB_CMD}" > "${COMPILE_DIR}/compile.log" 2>&1
 COMPILE_RC=$?
 if [ "${COMPILE_RC}" != 0 ]; then
@@ -150,10 +172,27 @@ if [ -z "${LINK_RAW}" ]; then
     echo "run.sh: could not extract cfg1_out link command" >&2
     exit 2
 fi
-LINK_CMD="$(printf '%s\n' "${LINK_RAW}" \
-    | sed -E "s#CMakeFiles/cfg1_out\.dir/generated/cfg1_out\.c\.obj#${COMPILE_DIR}/cfg1_out.c.obj#" \
-    | sed -E "s#CMakeFiles/cfg1_out\.dir/([a-zA-Z0-9_./]*start\.S\.obj)#${BUILD_DIR}/CMakeFiles/cfg1_out.dir/\1#" \
+LINK_STEP1="$(printf '%s\n' "${LINK_RAW}" \
+    | sed -E "s#CMakeFiles/cfg1_out\.dir/generated/cfg1_out\.c\.obj#${COMPILE_DIR}/cfg1_out.c.obj#")"
+if [ "${LINK_STEP1}" = "${LINK_RAW}" ]; then
+    echo "run.sh: FATAL: link-command cfg1_out.c.obj substitution did not match" >&2
+    echo "  ninja command was: ${LINK_RAW}" >&2
+    exit 2
+fi
+LINK_STEP2="$(printf '%s\n' "${LINK_STEP1}" \
+    | sed -E "s#CMakeFiles/cfg1_out\.dir/([a-zA-Z0-9_./]*start\.S\.obj)#${BUILD_DIR}/CMakeFiles/cfg1_out.dir/\1#")"
+if [ "${LINK_STEP2}" = "${LINK_STEP1}" ]; then
+    echo "run.sh: FATAL: link-command start.S.obj substitution did not match" >&2
+    echo "  ninja command was: ${LINK_STEP1}" >&2
+    exit 2
+fi
+LINK_CMD="$(printf '%s\n' "${LINK_STEP2}" \
     | sed -E "s#-o cfg1_out #-o ${COMPILE_DIR}/cfg1_out #")"
+if [ "${LINK_CMD}" = "${LINK_STEP2}" ]; then
+    echo "run.sh: FATAL: link-command -o cfg1_out substitution did not match" >&2
+    echo "  ninja command was: ${LINK_STEP2}" >&2
+    exit 2
+fi
 bash -c "${LINK_CMD}" > "${COMPILE_DIR}/link.log" 2>&1
 LINK_RC=$?
 if [ "${LINK_RC}" != 0 ] || [ ! -f "${COMPILE_DIR}/cfg1_out" ]; then
@@ -163,17 +202,48 @@ if [ "${LINK_RC}" != 0 ] || [ ! -f "${COMPILE_DIR}/cfg1_out" ]; then
 fi
 
 NM_RAW="$(ninja -C "${BUILD_DIR}" -t commands generated/cfg1_out.syms 2>/dev/null | grep 'nm_to_file.cmake')"
-NM_CMD="$(printf '%s\n' "${NM_RAW}" \
-    | sed -E "s#-DELF=[^ ]*/cfg1_out #-DELF=${COMPILE_DIR}/cfg1_out #" \
-    | sed -E "s#-DOUT=[^ ]*generated/cfg1_out\.syms#-DOUT=${COMPILE_DIR}/cfg1_out.syms#g" \
-    | sed -E "s#-DSYMS=[^ ]*generated/cfg1_out\.syms#-DSYMS=${COMPILE_DIR}/cfg1_out.syms#g")"
+if [ -z "${NM_RAW}" ]; then
+    echo "run.sh: could not extract nm command" >&2
+    exit 2
+fi
+NM_STEP1="$(printf '%s\n' "${NM_RAW}" | sed -E "s#-DELF=[^ ]*/cfg1_out #-DELF=${COMPILE_DIR}/cfg1_out #")"
+if [ "${NM_STEP1}" = "${NM_RAW}" ]; then
+    echo "run.sh: FATAL: nm-command -DELF substitution did not match" >&2
+    echo "  ninja command was: ${NM_RAW}" >&2
+    exit 2
+fi
+NM_STEP2="$(printf '%s\n' "${NM_STEP1}" | sed -E "s#-DOUT=[^ ]*generated/cfg1_out\.syms#-DOUT=${COMPILE_DIR}/cfg1_out.syms#g")"
+if [ "${NM_STEP2}" = "${NM_STEP1}" ]; then
+    echo "run.sh: FATAL: nm-command -DOUT substitution did not match" >&2
+    echo "  ninja command was: ${NM_STEP1}" >&2
+    exit 2
+fi
+NM_CMD="$(printf '%s\n' "${NM_STEP2}" | sed -E "s#-DSYMS=[^ ]*generated/cfg1_out\.syms#-DSYMS=${COMPILE_DIR}/cfg1_out.syms#g")"
+if [ "${NM_CMD}" = "${NM_STEP2}" ]; then
+    echo "run.sh: FATAL: nm-command -DSYMS substitution did not match" >&2
+    echo "  ninja command was: ${NM_STEP2}" >&2
+    exit 2
+fi
 bash -c "${NM_CMD}" > "${COMPILE_DIR}/nm.log" 2>&1
 NM_RC=$?
 
 OBJCOPY_RAW="$(ninja -C "${BUILD_DIR}" -t commands generated/cfg1_out.srec 2>/dev/null | grep -- '-O srec')"
-OBJCOPY_CMD="$(printf '%s\n' "${OBJCOPY_RAW}" \
-    | sed -E "s#[^ ]*/cfg1_out #${COMPILE_DIR}/cfg1_out #" \
-    | sed -E "s#[^ ]*generated/cfg1_out\.srec#${COMPILE_DIR}/cfg1_out.srec#")"
+if [ -z "${OBJCOPY_RAW}" ]; then
+    echo "run.sh: could not extract objcopy command" >&2
+    exit 2
+fi
+OBJCOPY_STEP1="$(printf '%s\n' "${OBJCOPY_RAW}" | sed -E "s#[^ ]*/cfg1_out #${COMPILE_DIR}/cfg1_out #")"
+if [ "${OBJCOPY_STEP1}" = "${OBJCOPY_RAW}" ]; then
+    echo "run.sh: FATAL: objcopy-command cfg1_out (ELF input) substitution did not match" >&2
+    echo "  ninja command was: ${OBJCOPY_RAW}" >&2
+    exit 2
+fi
+OBJCOPY_CMD="$(printf '%s\n' "${OBJCOPY_STEP1}" | sed -E "s#[^ ]*generated/cfg1_out\.srec#${COMPILE_DIR}/cfg1_out.srec#")"
+if [ "${OBJCOPY_CMD}" = "${OBJCOPY_STEP1}" ]; then
+    echo "run.sh: FATAL: objcopy-command cfg1_out.srec (output) substitution did not match" >&2
+    echo "  ninja command was: ${OBJCOPY_STEP1}" >&2
+    exit 2
+fi
 bash -c "${OBJCOPY_CMD}" > "${COMPILE_DIR}/objcopy.log" 2>&1
 OBJCOPY_RC=$?
 
@@ -229,6 +299,44 @@ echo "[ruby] rc=${RUBY_RC}"
 echo "[python] rc=${PY_RC}"
 
 RESULT=0
+
+#  ★修正2: rc一致＋expected-substring存在だけの判定では、片方のエンジンが
+#  途中でtracebackを吐いて異常終了していても、たまたま両者のrcが一致し
+#  （例：期待した診断が原因コードで先に出力された「後」にPython側が別の
+#  未処理例外でクラッシュし、Pythonのデフォルト終了コードが偶然Rubyの意図
+#  した終了コードと一致する等）、かつEXPECTがクラッシュ前に出力済みの診断
+#  文言に一致してしまうと、RESULT=OKになりうる（実際に踏んだ：
+#  kernel/interrupt.py の KeyError で再現）。rc/文字列一致とは独立に、ログに
+#  Pythonのtracebackまたは Rubyのbacktraceが含まれていないかを必ず検査する。
+check_no_crash() {
+    local label="$1" logfile="$2"
+    [ -f "${logfile}" ] || return 0
+    if grep -q '^Traceback (most recent call last):' "${logfile}"; then
+        echo "run.sh: [FAIL] ${label}: unhandled Python traceback detected" \
+             "(engine crashed instead of reporting a clean diagnostic)"
+        tail -15 "${logfile}"
+        return 1
+    fi
+    if grep -qE '\.rb:[0-9]+:in `' "${logfile}"; then
+        echo "run.sh: [FAIL] ${label}: unhandled Ruby backtrace detected" \
+             "(engine crashed instead of reporting a clean diagnostic)"
+        tail -15 "${logfile}"
+        return 1
+    fi
+    return 0
+}
+for _log in \
+    "ruby pass1:${RUBY_DIR}/pass1.log" \
+    "python pass1:${PY_DIR}/pass1.log" \
+    "ruby kernel_cfg:${RUBY_DIR}/kernel_cfg.log" \
+    "python kernel_cfg:${PY_DIR}/kernel_cfg.log"
+do
+    _label="${_log%%:*}"
+    _file="${_log#*:}"
+    if ! check_no_crash "${_label}" "${_file}"; then
+        RESULT=1
+    fi
+done
 
 if [ "${RUBY_RC}" != "${PY_RC}" ]; then
     echo "run.sh: [MISMATCH] ruby rc=${RUBY_RC} != python rc=${PY_RC}"
