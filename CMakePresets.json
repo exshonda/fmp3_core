@@ -8,6 +8,7 @@
   "include": [
     "target/polarfire_soc_kit_gcc/presets.json",
     "target/musca_b1_gcc/presets.json",
-    "target/rp2350_pico2_gcc/presets.json"
+    "target/rp2350_pico2_gcc/presets.json",
+    "target/kria_arm64_gcc/presets.json"
   ]
 }

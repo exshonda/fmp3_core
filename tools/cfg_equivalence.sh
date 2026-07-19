@@ -131,29 +131,51 @@ fi
 echo "== compiling cfg1_out (shared inputs for both pipelines, per Task1 Step3 rationale) =="
 #  cfg1_out.c は pass1 が MATCH した前提のもとでは Ruby/Python どちらの
 #  出力を使っても同じバイナリになる。既存ビルドの cfg1_out ELF から nm/objcopy
-#  で得た .syms/.srec（generated/cfg1_out.syms, generated/cfg1_out.srec）を、
-#  両パイプラインで共有する（設計書 §7.1: cfg1_out.dbはPStore/pickleで別形式
-#  のため共有できないが、.syms/.srecはnm/objcopyの出力でエンジン非依存）。
+#  (or objdump) で得た .syms/.srec（or .dump）（generated/cfg1_out.syms,
+#  generated/cfg1_out.{srec,dump}）を、両パイプラインで共有する（設計書
+#  §7.1: cfg1_out.dbはPStore/pickleで別形式のため共有できないが、
+#  .syms/.srec/.dumpはnm/objcopy/objdumpの出力でエンジン非依存）。
+#
+#  ★ROM イメージの拡張子はターゲットの FMP3_DUMP_FORMAT（既定 srec、
+#    kria_arm64_gcc は dump）で変わる（Task 6 で追加）。cfg_py/pass2.py の
+#    Cfg1Out.read() は cwd の裸ファイル名 "cfg1_out.srec" が存在すれば
+#    srec として、無ければ "cfg1_out.dump" を dump として読む（拡張子
+#    決め打ちの分岐であって --rom-image 引数の値は見ない）。したがって
+#    ここで両ディレクトリへコピーする際は，実際に生成された方の拡張子を
+#    そのまま維持しなければならない（.srec に固定リネームすると，dump
+#    形式ターゲットで両エンジンとも磁気番号(magic number)読み取りに失敗し，
+#    かつ「失敗が同一」であるために誤って「一致」と誤読しかねない）。
 SYMS="${BUILD_DIR}/generated/cfg1_out.syms"
-SREC="${BUILD_DIR}/generated/cfg1_out.srec"
-if [ ! -f "${SYMS}" ] || [ ! -f "${SREC}" ]; then
-    echo "cfg_equivalence.sh: ${SYMS} / ${SREC} not found. Build cfg1_out_syms/cfg1_out_srec targets first:" >&2
+ROMIMG=""
+ROMIMG_BASENAME=""
+for ext in srec dump; do
+    cand="${BUILD_DIR}/generated/cfg1_out.${ext}"
+    if [ -f "${cand}" ]; then
+        ROMIMG="${cand}"
+        ROMIMG_BASENAME="cfg1_out.${ext}"
+        break
+    fi
+done
+if [ ! -f "${SYMS}" ] || [ -z "${ROMIMG}" ]; then
+    echo "cfg_equivalence.sh: ${SYMS} / ${BUILD_DIR}/generated/cfg1_out.{srec,dump} not found. Build cfg1_out_syms/cfg1_out_srec targets first:" >&2
     echo "  ninja -C ${BUILD_DIR} cfg1_out_syms cfg1_out_srec" >&2
+    echo "  (cfg1_out_srec is the target name regardless of FMP3_DUMP_FORMAT; it produces cfg1_out.dump for dump-format targets)" >&2
     exit 2
 fi
 #  ★実測で判明した罠: pass2.rb / pass2.py の Cfg1Out.read()（両エンジンとも）は
 #  --rom-symbol/--rom-image のCLI引数とは無関係に、CFG1_OUT_SYMS="cfg1_out.syms"
-#  / CFG1_OUT_SREC="cfg1_out.srec" という「裸の相対ファイル名」を cwd から
-#  ハードコードで読む（--rom-symbol/--rom-image が渡す絶対パスは、テンプレート
-#  内で個別に参照する $romSymbol テーブル専用で、pass1→pass2 の主ハンドオフとは
-#  別経路）。これをコピーしないと RUBY_DIR/PY_DIR どちらも
-#  "No such file or directory - cfg1_out.syms" で同一に失敗し、「両方とも
-#  MISSING」を「テンプレート未実装によるTask2時点の想定内失敗」と誤読しかねない
-#  （offset/kernel_cfg比較の意味が失われる）。両ディレクトリへ明示的に複製する。
+#  / CFG1_OUT_SREC="cfg1_out.srec" / CFG1_OUT_DUMP="cfg1_out.dump" という
+#  「裸の相対ファイル名」を cwd から拡張子で存在判定して読む（--rom-symbol/
+#  --rom-image が渡す絶対パスは、テンプレート内で個別に参照する
+#  $romSymbol テーブル専用で、pass1→pass2 の主ハンドオフとは別経路）。これを
+#  コピーしないと RUBY_DIR/PY_DIR どちらも "No such file or directory -
+#  cfg1_out.syms" で同一に失敗し、「両方とも MISSING」を「テンプレート未実装
+#  によるTask2時点の想定内失敗」と誤読しかねない（offset/kernel_cfg比較の
+#  意味が失われる）。両ディレクトリへ明示的に複製する（拡張子は維持する）。
 cp "${SYMS}" "${RUBY_DIR}/cfg1_out.syms"
-cp "${SREC}" "${RUBY_DIR}/cfg1_out.srec"
+cp "${ROMIMG}" "${RUBY_DIR}/${ROMIMG_BASENAME}"
 cp "${SYMS}" "${PY_DIR}/cfg1_out.syms"
-cp "${SREC}" "${PY_DIR}/cfg1_out.srec"
+cp "${ROMIMG}" "${PY_DIR}/${ROMIMG_BASENAME}"
 
 echo "== pass2 -O (offset.h) =="
 OFFSET_CMD="$(extract_cmd generated/offset.timestamp)"

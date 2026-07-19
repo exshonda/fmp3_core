@@ -1,0 +1,41 @@
+{
+  "version": 4,
+  "include": [
+    "../../cmake/presets-base.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "kria_arm64",
+      "inherits": "_base",
+      "displayName": "KRIA SOM Cortex-A53 (AArch64, QEMU xlnx-zcu102, 4 processors)",
+      "description": "QEMU xlnx-zcu102 マシン向け（実機は別途JTAG。既定TNUM_PRCID=4）。QEMU >= 11.0.1 が必要",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-aarch64-none-elf.cmake",
+      "cacheVariables": {
+        "FMP3_TARGET": "kria_arm64_gcc"
+      }
+    },
+    {
+      "name": "kria_arm64-1core",
+      "inherits": "kria_arm64",
+      "displayName": "KRIA SOM Cortex-A53 (AArch64, QEMU xlnx-zcu102, 1 processor)",
+      "description": "1コア（TNUM_PRCID=1）。単独動作のsecondary-core起動経路を踏まない最小構成",
+      "cacheVariables": {
+        "FMP3_PRC_NUM": "1"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "kria_arm64",        "configurePreset": "kria_arm64" },
+    { "name": "kria_arm64-1core",  "configurePreset": "kria_arm64-1core" },
+    {
+      "name": "run-kria_arm64",
+      "configurePreset": "kria_arm64",
+      "targets": [ "run" ]
+    },
+    {
+      "name": "run-kria_arm64-1core",
+      "configurePreset": "kria_arm64-1core",
+      "targets": [ "run" ]
+    }
+  ]
+}
