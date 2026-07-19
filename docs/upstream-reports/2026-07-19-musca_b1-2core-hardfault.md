@@ -186,3 +186,275 @@ NVIC はコアごとに独立したインスタンスであり、`raise_int`/`pr
   そのまま実行している。
 
 したがって本件はターゲット依存部固有の問題と判断している。
+
+---
+
+## 上流 20260719 修正後に残る事象（2026-07-19 追記）
+
+上記「ステータス」節の通り、本報告が指摘した HRT 状態未分離による HardFault は
+`rp2350_pico2_gcc-20260719`（pin `b59797f14dedcb07020f96895903ca7fcd14a4af`）で解消された。
+**しかし、同じ再検証の過程で別の異常が見つかったので、同一ターゲット・同一コミットに
+関するものとしてここに追記する。**（本件を別ファイルに分けるか一体にするかについては、
+当方は「一体化」を選んだ。理由は文末の「本追記の位置づけについて」を参照。）
+
+### 症状（事実）
+
+QEMU（`musca-b1`、`qemu-system-arm` 11.0.1）で `sample/sample1` を2コア構成
+（`TNUM_PRCID=2`）でビルドし、既定状態（シリアル入力を一切与えない）のまま実行すると、
+以下のログが**周期的に**出力され続ける。
+
+```
+no time event is processed in hrt interrupt on PRC2.
+```
+
+- 出所: `kernel/time_event.c:756-758`（`signal_time()` 内、`nocall == 0` のとき出る `LOG_NOTICE`）
+- 20秒の実行で **47回**（全出力160行の約30%）出力される
+- **全て `on PRC2`。`on PRC1` は1回も出ない**
+- musca_b1 の1コア構成（`TNUM_PRCID=1`）、および polarfire の4コア構成では **0回**
+
+カーネルは HardFault 等では停止せず、`set_hrt_event()` により毎回タイマを再設定して
+走行を継続する。**致命的ではないが、正常でもない。**
+
+#### 当方による再現・実測
+
+`build/musca_b1-2core/fmp`（本タスク時点で既にビルド済みの、pristine 未改変の成果物）を、
+リポジトリを一切変更せずにそのまま実行して確認した。
+
+```
+timeout 22 qemu-system-arm -machine musca-b1 -cpu cortex-m33 \
+    -kernel build/musca_b1-2core/fmp -nographic \
+    -semihosting-config enable=on,target=native
+```
+
+- 22秒のタイムアウト内で本ログが **52回**出力され、全て `on PRC2`（`on PRC1` は0回）。
+  別の25秒タイムアウトの試行では**59回**（同じく全て PRC2）。回数はタイムアウトの
+  切り方（何周期目で `timeout` が SIGTERM を送るか）に依存するため、報告記載の
+  「20秒で47回」と厳密には一致しないが、同じ現象・同じオーダーである。
+- 各行に発生時刻（ホスト側 `date +%s.%N`、1行ずつパイプで付与）を記録し、
+  連続する通知の間隔を計測したところ、52回中51個の間隔は
+  **平均 0.41947秒（最小 0.4115秒、最大 0.4264秒）** と、極めて狭い分散で一定だった
+  （ばらつきはホスト側タイムスタンプ付与のシェルパイプのジッタで説明できる範囲）。
+  この周期性が、後述する機序の直接的な裏付けである。
+
+### 機序（当方の調査結果）
+
+#### 事実（コード読解）
+
+`kernel/time_event.c` の `set_hrt_event()`（`:420-481`）は、対象プロセッサのタイムイベント
+ヒープが空（`LAST_INDEX(...) == 0`）のとき、musca_b1 が使う非64bit HRTCNT の場合分けで
+次のように分岐する（`:436-457`）。
+
+```c
+if (p_pcb->prcid == TOPPERS_TMASTER_PRCID) {
+    /* タイムマスタプロセッサでは，HRTCNT_BOUND後に割込みを発生させる．*/
+    target_hrt_set_event(p_pcb->prcid, HRTCNT_BOUND);
+}
+else {
+    /* 他のプロセッサでは，割込みを発生させないようにする．*/
+    target_hrt_clear_event(p_pcb->prcid);
+}
+```
+
+`target/musca_b1_gcc/target_kernel.h:37` により `TOPPERS_TMASTER_PRCID = PRC1`。
+2コア構成では `TOPPERS_TEPP_PRC = 0x3`（`target_kernel.h:59`）のため PRC1・PRC2 とも
+タイムイベント処理プロセッサであり、`set_hrt_event()` は両方に対して呼ばれる。
+
+PRC2（非マスタ）で呼ばれる `target_hrt_clear_event(prcid)` は
+`target/musca_b1_gcc/target_timer.h:88-92` の薄い転送を経て
+`hrt_clear_event_body()`（`target_timer.c:228-233`）に到達する。
+
+```c
+void
+hrt_clear_event_body(void)
+{
+    hrt_base[get_my_prcidx()] += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
+    hrt_program(HRT_MAX_TICKS);
+}
+```
+
+`hrt_program()`（`target_timer.c:123-144`）は SysTick を「リロード値 `ticks`、
+`SYSTIC_TICINT` 割込み有効」で（再）起動する関数であり、`hrt_clear_event_body()` は
+これを **`HRT_MAX_TICKS`（`target_timer.h:52`、`0x00FFFFFF` = SysTick の24bit最大値）**
+という値で呼んでいる。すなわち「クリア」＝「割込みを止める」ではなく、
+「**表現できる最大区間で SysTick を再起動する（割込みは有効なまま）**」である。
+
+musca_b1 の SysTick はプロセッサクロック 40MHz（`musca_b1.h:57`、
+`HRT_CLOCKS_PER_US = CPU_CLOCK_HZ/1000000 = 40`）で駆動するダウンカウンタなので、
+この「最大区間」は
+
+```
+HRT_MAX_TICKS / (CPU_CLOCK_HZ / 1e6) = 16777215 / 40 = 419430.375 us ≒ 0.41943 秒
+```
+
+にしかならない。したがって PRC2 は「クリアした」つもりでも **約0.4194秒後に必ず
+SysTick 割込みが発生し**、`target_hrt_handler()` → `signal_time()` が呼ばれる。
+このとき PRC2 のタイムイベントヒープが依然として空であれば（後述）、
+`nocall == 0` となり本 NOTICE が出て、`signal_time()` の末尾で `set_hrt_event()` が
+再度呼ばれて同じ「クリア」（＝0.4194秒後の再割込み）が繰り返される。
+これが無限に続く。
+
+上で実測した平均間隔 **0.41947秒**は、この計算値 **0.419430秒**と一致する
+（差は計測パイプのジッタの範囲内）。したがって**この機序で、実測された周期性まで
+説明できる**。
+
+#### なぜ PRC2 だけか（事実：ヒープが空のまま）
+
+`sample/sample1.cfg` は PRC1・PRC2 それぞれに `CRE_CYC`/`CRE_ALM`
+（`CYCHDR1_1`/`ALMHDR1_1` は PRC1、`CYCHDR2_1`/`ALMHDR2_1` は PRC2）を登録しているが、
+いずれも `TA_STA`（自動起動）属性ではない（`sample1.cfg:24-25,55-56`）。
+`sample/sample1.c` を読むと、これらはシリアルからのキー入力コマンド
+（`sta_cyc`/`msta_cyc`/`sta_alm`/`msta_alm`、`sample1.c:1062-1083`）でのみ起動される。
+本検証ではシリアル入力を一切与えていないため、**PRC1・PRC2 とも、周期ハンドラ／
+アラームハンドラは既定では1つも起動していない**。
+
+一方、`syssvc/logtask.c` の `logtask_main()` は `LOGTASK` タスクとして起動時に
+自動実行され（`syssvc/logtask.cfg:12-13`、`TA_ACT`）、`dly_tsk(LOGTASK_INTERVAL)`
+（既定 `10000`us = 10ms、`logtask.c:65`）や `dly_tsk(LOGTASK_FLUSH_WAIT)`
+（既定 `1000`us = 1ms、`logtask.c:72`）でポーリングし続ける。`LOGTASK` の所属クラスは
+`CLS_SERIAL`（`syssvc/logtask.cfg:12`）で、musca_b1 では
+`target/musca_b1_gcc/target_syssvc.h:33` により **`CLS_SERIAL == CLS_PRC1`**。
+
+すなわち、**PRC1 には常時 10ms 未満の間隔でタイムイベントを積み続ける LOGTASK が
+存在し、PRC2 には既定でそのような発生源が1つも無い**。これが PRC1 の
+ヒープが（少なくともこの実行時間内は）空にならず、PRC2 のヒープだけが恒常的に
+空になる理由である。
+
+`set_hrt_event()` のヒープ空判定（`kernel/time_event.c:436`）に、
+PRC1 は（LOGTASK の10ms/1ms周期に押されて）ほぼ到達せず、PRC2 は常に到達する。
+これが「全て PRC2、PRC1 は0回」を説明する。
+
+#### 結論（機序は特定できた）
+
+以上をまとめると:
+
+1. `TOPPERS_TEPP_PRC = 0x3` により PRC2 も独立したタイムイベント処理プロセッサとなる
+   （`target_kernel.h:59`。この値は今回の 20260719 取り込みより前から変わっていない
+   ことを `git log upstream -- target/musca_b1_gcc/target_kernel.h` で確認済み）。
+2. 既定の `sample1` 構成では PRC2 側に周期的なタイムイベント発生源が無いため、
+   PRC2 のタイムイベントヒープは恒常的に空になる。
+3. ヒープが空の非マスタプロセッサに対し、カーネル共通部は
+   `target_hrt_clear_event()`（＝「当面割込みを発生させない」という契約）を呼ぶ
+   （`kernel/time_event.c:454`）。
+4. musca_b1 の `hrt_clear_event_body()` はこの契約を**「SysTick が表現できる最大区間
+   （24bit / 40MHz ≒ 0.4194秒）で再武装する」**という形で実装している
+   （`target_timer.c:228-233`）。SysTick はダウンカウンタでありハードウェア的に
+   「無限に鳴らさない」設定ができないため、この実装は**必ず約0.42秒ごとに
+   割込みを発生させてしまう**。
+5. 20260719 の修正**前**は PRC2 がこの状態（安定して走り続けること自体）に
+   到達できなかった（起動直後に HardFault）ため、この既存の（修正で変わっていない）
+   `hrt_clear_event_body()` の挙動は**観測されたことが無かった**。修正により PRC2 が
+   安定して走るようになったことで、この潜在していた挙動が初めて表面化した。
+
+**機序は特定できたと考える**（コード読解に加え、実測した周期 0.41947秒が計算値
+0.419430秒と一致することで裏付けた）。「状態破壊」のような未解明の要素は残っていない。
+
+`target_hrt_set_event`/`clear_event`/`raise_event`（`target_timer.h:82-98`）はいずれも
+引数 `prcid` を無視し `get_my_prcidx()` のみを使うが、これは
+`TOPPERS_SUPPORT_CONTROL_OTHER_HRT` が未定義（他プロセッサの HRT 操作は
+`request_set_hrt_event()` の IPI 経由）である限り `prcid` は常に自プロセッサと
+一致するため安全であり、本件の原因ではない（一度疑ったが、コード読解で否定した）。
+
+### 影響評価
+
+- **致命的ではない。** カーネルは `set_hrt_event()` により毎回タイマを再設定し、
+  走行を継続する。データや状態の破壊は起きていない。
+- **周期タスクの精度への影響は無いと考えられる。** 実際に周期ハンドラ／アラームを
+  PRC2 に起動した場合、`tmevtb_enqueue`/`tmevtb_enqueue_reltim` はヒープへの登録直後に
+  `set_hrt_event()` を呼び直し、`hrt_program()` は毎回 SysTick の
+  `CONTROL_STATUS`/`RELOAD_VALUE`/`CURRENT_VALUE` を書き直すため、直前の「クリア」
+  状態（最大区間で回っていたこと）は実イベント登録時に完全に上書きされる。
+  また `signal_time()`／`set_hrt_event()` は `lock_cpu()`+`acquire_glock()` で
+  保護されているため、スプリアス割込みとイベント登録のレースで実イベントが
+  失われる経路も見当たらない。ただし**この「精度に影響しない」は静的なコード読解に
+  よる判断であり、PRC2 で実際に `CRE_CYC`/`sta_cyc` を使った周期タスクを走らせて
+  精度を実測する検証までは行っていない**（本タスクの時間内では未実施）。
+- **CPU 時間への影響は僅少。** 割込みハンドラ（`target_hrt_handler`）とヒープ空判定は
+  いずれも短い処理であり、0.42秒に1回程度の頻度でこれが起きても実行時間への影響は
+  無視できる範囲と考えられる。
+- **消費電力への影響は「不明・本リポジトリでは評価不能」。** 本カーネル（`kernel/` 配下、
+  `arch/arm_m_gcc/common/` 配下）に `WFI`／低消費電力アイドルの仕組みが実装されている
+  形跡を確認できなかった（`grep -rn "WFI\|wfi\|idle"` で該当なし）。したがって
+  「アイドル中の PRC2 を不要に起こしてしまう」という一般的な低消費電力設計上の懸念は
+  理屈としては成立するが、**本ターゲットの現状の実装ではそもそも低消費電力アイドルを
+  行っていない可能性が高く、電力への実害があるかどうかは判断できない**。
+- **ログの実用上の影響。** `LOG_NOTICE` レベルで20秒に47回（≒全出力の3割）出力されるため、
+  実機デバッグ時にシリアルログの可読性を大きく損なう。これは軽微ではあるが実害である。
+
+### 1コア構成／polarfire に影響が無いことの確認（理屈）
+
+- **musca_b1 1コア構成（`TNUM_PRCID=1`）**: `TOPPERS_TEPP_PRC = 0x1`
+  （`target_kernel.h:57`）で PRC2 自体が存在せず、`target_timer.cfg` の PRC2 用
+  `CLASS(CLS_PRC2){...}` ブロックも `#if TNUM_PRCID >= 2` でコンパイルされない
+  （`target_timer.cfg:26`）。加えて PRC1 は前述の通り LOGTASK が常時押しているため、
+  そもそも「ヒープが空の非マスタプロセッサ」という状況が発生し得ない。
+- **polarfire（RISC-V、4コア）**: `TOPPERS_TEPP_PRC = 0xf`
+  （`target/polarfire_soc_kit_gcc/target_kernel.h:42`）で PRC2〜4 も musca_b1 と同様に
+  タイムイベント処理プロセッサであり、既定構成でも周期ハンドラを起動していなければ
+  同じ理屈で「ヒープが空の非マスタプロセッサ」は起こり得る。しかし
+  `arch/riscv_gcc/common/mtimer.h:164-168` の `target_hrt_clear_event()` は
+
+  ```c
+  Inline void
+  target_hrt_clear_event(ID prcid)
+  {
+      mtimer_set_mtimecmp(prcid, 0xFFFFFFFFFFFFFFFFULL);
+  }
+  ```
+
+  と、**真に64bitのコンペアレジスタ**（RISC-V `mtimecmp`）を最大値に設定する。
+  この値に実際に到達するまでの時間は現実的な実行時間を大きく超えるため、
+  「クリア＝事実上二度と鳴らない」が成立する。musca_b1 の SysTick が
+  24bit・40MHzで最大区間が0.42秒しか取れないのとは対照的に、polarfire の
+  HRT ハードウェアはカーネル共通部の「クリア」契約を額面通り実現できる。
+  **したがって、両ターゲットとも `TOPPERS_TEPP_PRC` の設計は同型だが、
+  HRT ハードウェアの表現力の違いにより musca_b1 だけで問題が顕在化する**、
+  という理屈になる（polarfire での実機・QEMU 再検証は本タスクでは行っていない。
+  既知の「4コアで0回」という観測結果と、上記コード読解が整合することのみ確認した）。
+
+### 確認したい点（上流への質問）
+
+1. **`hrt_clear_event_body()` の実装意図について。** 「クリア」を
+   「SysTick が表現できる最大区間（≒0.42秒）で再武装し、割込みは有効なまま」
+   として実装したのは意図的（SysTick には真の「無期限停止」の手段が無い前提での
+   次善策）か、それとも見落とし（本来は `SYSTIC_TICINT` または `SYSTIC_ENABLE` を
+   落として真にマスクすべきだった）か。仮に意図的だとしても、`kernel/time_event.c`
+   側の「クリア＝割込みを発生させない」というコメント（`:452`）との齟齬をどう
+   解決すべきとお考えか。
+2. **`TOPPERS_TEPP_PRC = 0x3`（PRC1・PRC2 とも時間イベント処理プロセッサ）は
+   musca_b1 の2コア構成にとって必須の設計か。** `target_timer.cfg` が
+   `TNUM_PRCID >= 2` で無条件に PRC2 の SysTick 初期化・割込みハンドラ登録を行う
+   （`target_timer.cfg:26-33`）ため、PRC2 が時間イベント処理プロセッサでない
+   （`TOPPERS_TEPP_PRC = 0x1`）構成にすると `signal_time()` が
+   `p_my_pcb->p_tevtcb`（NULL）を参照してクラッシュする恐れがあると当方は
+   読んでいるが、この理解で合っているか。合っているなら、PRC2 の SysTick を
+   「HRT として持つが時間イベント処理はしない」という構成は本ターゲットでは
+   選択できない、ということでよいか。
+3. **`kernel/time_event.c:756-758` の `LOG_NOTICE` の位置づけについて。**
+   これはタイムマスタプロセッサの `HRTCNT_BOUND` 経由の周期的な安全弁ウェイクアップ
+   （`:443-449`、ラップアラウンド対策）でも同様に `nocall == 0` となり得るため、
+   「本当に想定外の異常」と「設計上意図された安全弁／ターゲット依存の副作用」を
+   ログ上で区別できない。後者（本件のような、ターゲット依存の理由による
+   周期的な空振り）を `LOG_NOTICE`（デフォルトで有効なレベル）ではなく、
+   より低いレベルにする、または区別するフラグを設けるご予定はあるか。
+
+いずれも「意図された動作か、修正すべき不具合か」を確認したい、というのが主旨である。
+当方側での修正（`hrt_clear_event_body()` を `SYSTIC_ENABLE`/`SYSTIC_TICINT` を落として
+真にマスクする形に変える等）は、HRT の他の呼び出し規約（`hrt_get_current_body()` が
+割込み保留ビットを見て経過を判定している点など）への影響を精査する必要があるため、
+**当方では実施していない**。
+
+### 本追記の位置づけについて
+
+本件は「別ファイルにするか、本ファイルに追記するか」を判断する必要があった。
+当方は**本ファイルへの追記**を選んだ。理由:
+
+- 本件は 20260719 の同一コミット（`target/musca_b1_gcc/target_timer.c` の同一改修）を
+  再検証する過程で見つかったものであり、対象ファイル・対象コミットが本報告と完全に
+  一致する。上流側が「HardFault 修正の確認」として本ファイルを読む際、同じ文脈のまま
+  「直したら別の副作用が見えた」と読めることに価値があると判断した。
+- タイトルが `-hardfault.md` で内容が「解消済み」であるため、無関係の新規事象を
+  ここに足すと誤解を招く懸念はあったが、本件は`HardFault` そのものではないものの
+  「同じ修正の影響範囲の続報」であり、独立した新規不具合ではないため、
+  分離するメリットより文脈の連続性を保つメリットが上回ると判断した。
+- ステータス節（冒頭）は指示通り変更していない。**本追記は HardFault の状況を
+  何も変えない**（HardFault は解消済みのまま）。
