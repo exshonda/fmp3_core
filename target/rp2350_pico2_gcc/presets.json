@@ -1,0 +1,21 @@
+{
+  "version": 4,
+  "include": [
+    "../../cmake/presets-base.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "rp2350_pico2",
+      "inherits": "_base",
+      "displayName": "RaspberryPi Pico 2 (RP2350, dual Cortex-M33, build only)",
+      "description": "Phase D1: ビルドのみ（実機書込み・実行は未対応。QEMUにもRP2350相当のマシンは存在しない）",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "FMP3_TARGET": "rp2350_pico2_gcc"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "rp2350_pico2", "configurePreset": "rp2350_pico2" }
+  ]
+}
