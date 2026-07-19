@@ -67,6 +67,57 @@ sil_get_pid(ID *p_prcid)
 #endif /* defined(TNUM_PRCID) && (TNUM_PRCID >= 2) */
 }
 
+#if defined(TNUM_PRCID) && (TNUM_PRCID >= 2)
+
+/*
+ *  SIL スピンロック（マルチプロセッサ版）
+ *
+ *  syssvc/syslog.c の低レベル出力は SIL_LOC_SPN()〜SIL_UNL_SPN() で囲まれて
+ *  おり，プロセッサ間で出力が混ざらないことを期待している．割込みロック
+ *  （PRIMASK）だけでは他プロセッサを排除できないため，専用のスピンロックを
+ *  用いる（従来は target_sil.h で SIL_LOC_INT() と等価に定義しており，2 コア
+ *  構成では排他になっていなかった）．
+ *
+ *  自プロセッサからの再帰取得を識別するため，取得中のプロセッサID（1 オリジン）
+ *  を変数に保持する．実装方針は rp2350 に倣うが，本チップはハードウェアスピン
+ *  ロックを持たないため LOCK 型（LDREX/STREX）を用いる．
+ *
+ *  本ヘッダは chip_kernel_impl.h より先に読まれるため LOCK 型や try_lock() を
+ *  参照できない．そのため実体はすべて chip_kernel_impl.c に置き，ここでは
+ *  関数を宣言するだけにする．
+ */
+
+/*
+ *  SIL スピンロックの取得
+ *
+ *  PRIMASK の元の値を返す．自プロセッサが既に取得していた場合は bit1 をセット
+ *  して返す（bit1 は PRIMASK では未使用のため識別に利用できる）．
+ */
+extern uint32_t	TOPPERS_sil_loc_spn(void);
+
+/*
+ *  SIL スピンロックの返却
+ */
+extern void		TOPPERS_sil_unl_spn(uint32_t primask);
+
+/*
+ *  SIL スピンロックの強制解放（自プロセッサが取得していれば解放する）
+ */
+extern void		TOPPERS_sil_force_unl_spn(void);
+
+#define SIL_LOC_SPN()	((void)(TOPPERS_locked = TOPPERS_sil_loc_spn()))
+#define SIL_UNL_SPN()	(TOPPERS_sil_unl_spn(TOPPERS_locked))
+
+#else /* defined(TNUM_PRCID) && (TNUM_PRCID >= 2) */
+
+/*
+ *  SIL スピンロック（単一プロセッサ版）
+ *
+ *  単一プロセッサであり，スピンロックは割込みロックと等価である．
+ */
+#define SIL_LOC_SPN()  SIL_LOC_INT()
+#define SIL_UNL_SPN()  SIL_UNL_INT()
+
 /*
  *  SIL スピンロックの強制解放（単一プロセッサでは何もしない）
  */
@@ -74,6 +125,8 @@ Inline void
 TOPPERS_sil_force_unl_spn(void)
 {
 }
+
+#endif /* defined(TNUM_PRCID) && (TNUM_PRCID >= 2) */
 #endif /* TOPPERS_MACRO_ONLY */
 
 #endif /* TOPPERS_CHIP_SIL_H */

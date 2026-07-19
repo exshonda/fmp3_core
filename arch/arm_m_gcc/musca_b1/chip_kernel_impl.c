@@ -66,4 +66,78 @@ _kernel_chip_get_my_prcidx(void)
 	return 0U;
 }
 
+/*
+ *  SIL スピンロック（chip_sil.h 参照）
+ *
+ *  syslog の低レベル出力をプロセッサ間で排他するために用いる．
+ *  TOPPERS_sil_spn_var には取得中のプロセッサID（1オリジン）を保持し，
+ *  同一プロセッサからの再帰取得を識別する．
+ */
+LOCK		TOPPERS_sil_spn_lock;
+uint32_t	TOPPERS_sil_spn_var;
+
+/*
+ *  SIL スピンロックの取得
+ *
+ *  PRIMASK の元の値を返す．自プロセッサが既に取得していた場合は bit1 を
+ *  セットして返す（bit1 は PRIMASK では未使用のため識別に利用できる）．
+ *
+ *  取得できない間は，PRIMASK を元に戻して割込みを受け付けられるようにしてから
+ *  再度禁止して試行する（他プロセッサの解放を待つ間に自プロセッサの割込みを
+ *  塞ぎ続けないため）．
+ */
+uint32_t
+TOPPERS_sil_loc_spn(void)
+{
+	uint32_t	primask = get_primask();
+	ID			prcid;
+
+	set_primask();
+	sil_get_pid(&prcid);
+
+	if (TOPPERS_sil_spn_var == (uint32_t) prcid) {
+		/* すでに取得済み（再帰取得） */
+		return (1U << 1) | primask;
+	}
+	while (try_lock(&TOPPERS_sil_spn_lock)) {
+		/* 取得できなかったので，一旦割込みを許可してから再試行する */
+		assign_primask(primask);
+		set_primask();
+	}
+	TOPPERS_sil_spn_var = (uint32_t) prcid;
+	return primask;
+}
+
+/*
+ *  SIL スピンロックの返却
+ */
+void
+TOPPERS_sil_unl_spn(uint32_t primask)
+{
+	if ((primask & (1U << 1)) != 0U) {
+		/* 再帰取得だったので解放しない */
+		primask &= ~(1U << 1);
+	}
+	else {
+		TOPPERS_sil_spn_var = 0U;
+		release_lock(&TOPPERS_sil_spn_lock);
+	}
+	assign_primask(primask);
+}
+
+/*
+ *  SIL スピンロックの強制解放（自プロセッサが取得していれば解放する）
+ */
+void
+TOPPERS_sil_force_unl_spn(void)
+{
+	ID	prcid;
+
+	sil_get_pid(&prcid);
+	if (TOPPERS_sil_spn_var == (uint32_t) prcid) {
+		TOPPERS_sil_spn_var = 0U;
+		release_lock(&TOPPERS_sil_spn_lock);
+	}
+}
+
 #endif /* TNUM_PRCID >= 2 */

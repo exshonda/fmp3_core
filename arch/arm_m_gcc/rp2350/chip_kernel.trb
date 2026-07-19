@@ -9,19 +9,23 @@
 #
 
 #
-#  コア依存テンプレートのインクルード
-#
-IncludeTrb("core_kernel.trb")
-
-#
-#  ネイティブスピンロックの生成（コア依存部の定義を SIO 版で上書きする）
+#  ネイティブスピンロックの生成（コア依存部より先に定義し，そちらの既定実装を抑止する）
 #
 #  spninib の lock メンバに SIO_SPINLOCKn のアドレスを格納する．
 #
 $rp2350_spinlock_index = 0
+
+#  コア依存部に既定実装を定義させない（core_kernel.trb 参照）
+$generate_native_spn_defined = true
 
 def GenerateNativeSpn(params)
   ret = "(intptr_t)RP2350_SIO_SPINLOCKn(#{$rp2350_spinlock_index})"
   $rp2350_spinlock_index += 1
   return(ret)
 end
+
+#
+#  コア依存テンプレートのインクルード
+#
+IncludeTrb("core_kernel.trb")
+

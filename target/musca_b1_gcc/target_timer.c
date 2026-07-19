@@ -42,26 +42,37 @@
 #include <sil.h>
 
 /*
+ *  HRT の状態はプロセッサ毎に持つ
+ *
+ *  SysTick は Cortex-M のコアごとに独立したハードウェアであり，各コアは自分
+ *  の SysTick のみを参照・更新する（FMP3 では他プロセッサの HRT 操作は
+ *  TOPPERS_SUPPORT_CONTROL_OTHER_HRT が未定義のため request_set_hrt_event に
+ *  よる IPI 経由で行われ，target_hrt_* は常に自プロセッサに対して呼ばれる）．
+ *  したがって各配列要素は所有コアからのみアクセスされ，コア間の排他は不要
+ *  である．添字は get_my_prcidx()（0 始まり）を用いる．
+ */
+
+/*
  *  現在の区間の開始時刻 [us]（単調増加）
  */
-static volatile HRTCNT   hrt_base;
+static volatile HRTCNT   hrt_base[TNUM_PRCID];
 
 /*
  *  現在の区間長 [tick]（= SYST_RVR + 1）
  */
-static volatile uint32_t hrt_reload;
+static volatile uint32_t hrt_reload[TNUM_PRCID];
 
 /*
  *  前回 get_current が返した値（単調性保証のための下限）
  */
-static volatile HRTCNT   hrt_last;
+static volatile HRTCNT   hrt_last[TNUM_PRCID];
 
 /*
  *  区間設定直後（SYST_CVR を 0 にクリアし，まだ RVR にリロードしていない）
  *  かどうか．QEMU では CVR 書込み直後にカウンタが 0 を返すため，この間の
  *  経過を 0 として扱い，区間長分の見かけの経過（スパイク）を防ぐ．
  */
-static volatile uint8_t  hrt_fresh;
+static volatile uint8_t  hrt_fresh[TNUM_PRCID];
 
 /*
  *  SysTick の制御レジスタ設定値（プロセッサクロック，割込み許可，動作）
@@ -79,7 +90,8 @@ static volatile uint8_t  hrt_fresh;
 static uint32_t
 hrt_offset_ticks(void)
 {
-    uint32_t reload = hrt_reload;
+    uint_t   idx    = get_my_prcidx();
+    uint32_t reload = hrt_reload[idx];
     uint32_t cur;
     uint32_t off;
 
@@ -90,11 +102,11 @@ hrt_offset_ticks(void)
 
     cur = sil_rew_mem((void *) SYSTIC_CURRENT_VALUE);
 
-    if (hrt_fresh != 0U) {
+    if (hrt_fresh[idx] != 0U) {
         if (cur == 0U) {
             return 0U;          /* まだ RVR にリロードしていない */
         }
-        hrt_fresh = 0U;         /* リロードされ，カウント開始した */
+        hrt_fresh[idx] = 0U;    /* リロードされ，カウント開始した */
     }
 
     /* SYST_RVR = reload - 1 から cur まで減ったので経過は (reload-1) - cur */
@@ -111,14 +123,16 @@ hrt_offset_ticks(void)
 static void
 hrt_program(uint32_t ticks)
 {
+    uint_t idx = get_my_prcidx();
+
     if (ticks < 2U) {
         ticks = 2U;
     }
     if (ticks > HRT_MAX_TICKS) {
         ticks = HRT_MAX_TICKS;
     }
-    hrt_reload = ticks;
-    hrt_fresh = 1U;
+    hrt_reload[idx] = ticks;
+    hrt_fresh[idx] = 1U;
 
     sil_wrw_mem((void *) SYSTIC_CONTROL_STATUS, 0U);
     sil_wrw_mem((void *) SYSTIC_RELOAD_VALUE, ticks - 1U);
@@ -135,8 +149,10 @@ hrt_program(uint32_t ticks)
 void
 target_hrt_initialize(EXINF exinf)
 {
-    hrt_base = 0U;
-    hrt_last = 0U;
+    uint_t idx = get_my_prcidx();
+
+    hrt_base[idx] = 0U;
+    hrt_last[idx] = 0U;
     /* 最初の set_event までは最大区間で空回しする */
     hrt_program(HRT_MAX_TICKS);
 }
@@ -157,7 +173,8 @@ target_hrt_terminate(EXINF exinf)
 HRTCNT
 hrt_get_current_body(void)
 {
-    HRTCNT  v = (HRTCNT)(hrt_base + hrt_offset_ticks() / HRT_CLOCKS_PER_US);
+    uint_t  idx = get_my_prcidx();
+    HRTCNT  v = (HRTCNT)(hrt_base[idx] + hrt_offset_ticks() / HRT_CLOCKS_PER_US);
 
     /*
      *  単調性の保証．区間境界での再設定やカウンタ読出しの僅かな前後により
@@ -165,11 +182,11 @@ hrt_get_current_body(void)
      *  より小さくなった場合は前回値を返す．2^32 us での正規の折返しと区別
      *  するため，差が範囲の半分以上のときだけ「戻った」と判定する．
      */
-    if ((HRTCNT)(v - hrt_last) >= 0x80000000U) {
-        v = hrt_last;
+    if ((HRTCNT)(v - hrt_last[idx]) >= 0x80000000U) {
+        v = hrt_last[idx];
     }
     else {
-        hrt_last = v;
+        hrt_last[idx] = v;
     }
     return v;
 }
@@ -181,7 +198,7 @@ void
 hrt_set_event_body(HRTCNT hrtcnt)
 {
     /* これまでの経過を基準時刻に畳み込んでから区間を張り直す */
-    hrt_base += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
+    hrt_base[get_my_prcidx()] += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
 
     if (hrtcnt == 0U) {
         hrtcnt = 1U;
@@ -198,7 +215,7 @@ hrt_set_event_body(HRTCNT hrtcnt)
 void
 hrt_raise_event_body(void)
 {
-    hrt_base += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
+    hrt_base[get_my_prcidx()] += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
     hrt_program(HRT_MIN_TICKS);
 }
 
@@ -211,7 +228,7 @@ hrt_raise_event_body(void)
 void
 hrt_clear_event_body(void)
 {
-    hrt_base += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
+    hrt_base[get_my_prcidx()] += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
     hrt_program(HRT_MAX_TICKS);
 }
 
@@ -225,16 +242,17 @@ hrt_clear_event_body(void)
 void
 target_hrt_handler(void)
 {
+    uint_t   idx = get_my_prcidx();
     uint32_t csr = sil_rew_mem((void *) SYSTIC_CONTROL_STATUS);
 
     if ((csr & SYSTIC_COUNTFLAG) != 0U) {
         /* 区間終端に到達：1 区間分が経過した */
-        hrt_base += hrt_reload / HRT_CLOCKS_PER_US;
-        hrt_fresh = 0U;
+        hrt_base[idx] += hrt_reload[idx] / HRT_CLOCKS_PER_US;
+        hrt_fresh[idx] = 0U;
     }
     else {
         /* 通常は起こらない（防御的に経過分だけ計上） */
-        hrt_base += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
+        hrt_base[idx] += hrt_offset_ticks() / HRT_CLOCKS_PER_US;
     }
     sil_wrw_mem((void *) NVIC_ICSR, NVIC_PENDSTCLR);
 

@@ -37,9 +37,19 @@ end
 #
 #  ネイティブスピンロックの生成
 #
-def GenerateNativeSpn(params)
-  $kernelCfgC.add("LOCK _kernel_lock_#{params[:spnid]};")
-  return("((intptr_t) &_kernel_lock_#{params[:spnid]})")
+#  チップ依存部が先に定義している場合は，そちらを優先する．
+#  （本ファイルは末尾で kernel/kernel.trb をインクルードして生成を実行するため，
+#    チップ依存部が本ファイルのインクルード「後」に定義しても手遅れになる．
+#    このため，チップ依存部は本ファイルのインクルード「前」に定義し，ここでは
+#    未定義の場合にのみ既定の実装を与える．）
+#  ★defined?(GenerateNativeSpn) は使えない．名前が大文字始まりのため Ruby は
+#    「定数」への参照と解釈し，メソッドの有無を判定できない（常に nil になる）．
+#    このためチップ依存部が立てる明示フラグで判定する．
+if !$generate_native_spn_defined
+  def GenerateNativeSpn(params)
+    $kernelCfgC.add("LOCK _kernel_lock_#{params[:spnid]};")
+    return("((intptr_t) &_kernel_lock_#{params[:spnid]})")
+  end
 end
 
 #

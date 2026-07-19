@@ -48,6 +48,20 @@ LDSCRIPT = $(TARGETDIR)/musca_b1.ld
 include $(SRCDIR)/arch/$(CORE)_$(TOOL)/$(CHIP)/Makefile.chip
 
 #
+#  newlib のシステムコールスタブ
+#
+#  newlib の一部（stdio の reent 経路など）は _write / _read / _close /
+#  _lseek / _sbrk を参照する．本ターゲットはこれらを提供していないため，
+#  該当経路を引き込むアプリケーション（test_mtrans2 / test_mtrans5 等）が
+#  未定義参照でリンクできなかった．libnosys のスタブを与えて解決する．
+#
+#  リンクは左から右へ解決されるため，-lc より後に置く必要がある．本ファイルは
+#  生成される Makefile 中で -lc が LIBS に追加された後に include されるので，
+#  ここでの追記により -lc ... -lnosys の順序になる．
+#
+LIBS := $(LIBS) -lnosys
+
+#
 #  使用するツールの選択
 #
 QEMU = qemu-system-arm
