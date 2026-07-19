@@ -2,6 +2,27 @@
 
 報告日: 2026-07-19
 
+## ステータス: 上流 20260719 で修正済み（2026-07-19 追記）
+
+`rp2350_pico2_gcc-20260719`（release/3.4、取り込み pin
+`b59797f14dedcb07020f96895903ca7fcd14a4af`。musca_b1 の simple パッケージは
+`musca_b1_gcc-20260719`）で、下記「原因」節が指摘した
+`target/musca_b1_gcc/target_timer.c` の HRT 状態（`hrt_base`/`hrt_reload`/
+`hrt_last`/`hrt_fresh`）が、単一の `static volatile` 変数から
+**`[TNUM_PRCID]` の配列**（それぞれ `target_timer.c:58,63,68,75`）に修正された。
+各アクセス箇所（9箇所）が `get_my_prcidx()` でプロセッサ別に添字を引く形に
+改められ、`target_timer.h` の「本ターゲットは単一プロセッサ」という
+コメントも削除された。これは本報告の「修正の方向（提案）」節の内容と一致する。
+
+あわせて、本報告の「付随して見つかった不足」節で報告した
+`target/musca_b1_gcc/target_test.h` の `INTNO2` 未定義も、
+上流版で（当方が追加したものと等価な定義として）解消された。
+
+当方側で QEMU（`qemu-system-arm -machine musca-b1`）による2コア再検証を行い、
+`Processor 1 start.` / `Processor 2 start.` の2行が出力され、以前のように
+起動直後で HardFault 停止することなく走行を継続することを確認した。
+以下、報告時点の本文はそのまま残す。
+
 ## 対象
 
 - FMP3 バージョン: **3.4.0**（`UPSTREAM_VERSION`）
