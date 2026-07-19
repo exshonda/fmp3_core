@@ -78,6 +78,25 @@ if(NOT DEFINED FMP3_LDSCRIPT_VIA_DRIVER_T)
     set(FMP3_LDSCRIPT_VIA_DRIVER_T OFF)
 endif()
 
+#
+#  cfg1_out / 最終 ELF から作る ROM イメージの形式（cfg の --rom-image が
+#  読む拡張子）．
+#
+#  上流は arch/arm64_gcc/common/Makefile.core:34 で DUMP = dump と再定義
+#  する（他アーキでは sample/Makefile:133-134 の ifndef DUMP: DUMP = srec
+#  が既定）．cfg_py/cfg.py は拡張子で srec/dump を自動判別済みなので，
+#  ここで欠けているのは objcopy -O srec と objdump -s の分岐だけである．
+#
+#  «未定義のときだけ» 既定を与える（FMP3_LDSCRIPT_VIA_DRIVER_T と同じ
+#  理由。target.cmake がこの後 include されて "dump" を set() する）．
+#
+if(NOT DEFINED FMP3_DUMP_FORMAT)
+    set(FMP3_DUMP_FORMAT srec)
+endif()
+if(NOT DEFINED FMP3_DUMPOPTS)
+    set(FMP3_DUMPOPTS "")
+endif()
+
 include(${FMP3_TARGET_DIR}/target.cmake)
 
 #
@@ -111,6 +130,23 @@ if(DEFINED FMP3_LDSCRIPT)
     else()
         list(APPEND FMP3_LINK_OPTIONS -Wl,-T,${FMP3_LDSCRIPT})
     endif()
+endif()
+
+#
+#  FMP3_DUMP_FORMAT は target.cmake（またはコマンドラインの -D）が
+#  上書きし得るので，include(target.cmake) の後でここに検証を置く．
+#  cfg_py/cfg.py は --rom-image の拡張子が ".srec" かどうかだけで
+#  SRecord(..., "srec") / SRecord(..., "dump") を選ぶ（他の拡張子はすべて
+#  "dump" 扱いになる）．未知の FMP3_DUMP_FORMAT をそのまま通すと，
+#  拡張子だけ変な ROM イメージを cfg が「dump 形式」として黙って読もうと
+#  し，分かりにくい失敗になる．ここで早期に FATAL_ERROR にして configure
+#  時点で止める．
+#
+if(NOT FMP3_DUMP_FORMAT STREQUAL "srec" AND NOT FMP3_DUMP_FORMAT STREQUAL "dump")
+    message(FATAL_ERROR
+        "fmp3_core: FMP3_DUMP_FORMAT='${FMP3_DUMP_FORMAT}' is not supported. "
+        "Must be 'srec' or 'dump' (cfg_py/cfg.py only recognizes these two "
+        "ROM image formats).")
 endif()
 
 if(NOT FMP3_PRC_NUM STREQUAL "")
@@ -221,7 +257,7 @@ set(CFG1_OUT_FILE       ${CFG_GEN_DIR}/cfg1_out.c)
 set(CFG1_OUT_TIMESTAMP  ${CFG_GEN_DIR}/cfg1_out.timestamp)
 set(CFG1_OUT_DEPFILE    ${CFG_GEN_DIR}/cfg1_out_c.d)
 set(CFG1_OUT_SYMS_FILE  ${CFG_GEN_DIR}/cfg1_out.syms)
-set(CFG1_OUT_SREC_FILE  ${CFG_GEN_DIR}/cfg1_out.srec)
+set(CFG1_OUT_ROM_IMAGE_FILE ${CFG_GEN_DIR}/cfg1_out.${FMP3_DUMP_FORMAT})
 set(OFFSET_H_FILE       ${CFG_GEN_DIR}/offset.h)
 set(OFFSET_TIMESTAMP    ${CFG_GEN_DIR}/offset.timestamp)
 set(KERNEL_CFG_TIMESTAMP ${CFG_GEN_DIR}/kernel_cfg.timestamp)
@@ -358,12 +394,30 @@ add_custom_command(
     COMMENT "Generating cfg1_out.syms"
 )
 
-add_custom_command(
-    OUTPUT ${CFG1_OUT_SREC_FILE}
-    COMMAND ${CMAKE_OBJCOPY} -O srec -S $<TARGET_FILE:cfg1_out> ${CFG1_OUT_SREC_FILE}
-    DEPENDS cfg1_out
-    COMMENT "Generating cfg1_out.srec"
-)
+#
+#  ROM イメージ形式（FMP3_DUMP_FORMAT，既定 srec）で分岐する．
+#  上流 arch/arm64_gcc/common/Makefile.core:34 の DUMP=dump に相当．
+#
+if(FMP3_DUMP_FORMAT STREQUAL "dump")
+    add_custom_command(
+        OUTPUT ${CFG1_OUT_ROM_IMAGE_FILE}
+        COMMAND ${CMAKE_COMMAND}
+                -DOBJDUMP=${CMAKE_OBJDUMP}
+                -DELF=$<TARGET_FILE:cfg1_out>
+                "-DDUMPOPTS=${FMP3_DUMPOPTS}"
+                -DOUT=${CFG1_OUT_ROM_IMAGE_FILE}
+                -P ${FMP3_ROOT_DIR}/cmake/objdump_to_file.cmake
+        DEPENDS cfg1_out ${FMP3_ROOT_DIR}/cmake/objdump_to_file.cmake
+        COMMENT "Generating cfg1_out.dump"
+    )
+else()
+    add_custom_command(
+        OUTPUT ${CFG1_OUT_ROM_IMAGE_FILE}
+        COMMAND ${CMAKE_OBJCOPY} -O srec -S $<TARGET_FILE:cfg1_out> ${CFG1_OUT_ROM_IMAGE_FILE}
+        DEPENDS cfg1_out
+        COMMENT "Generating cfg1_out.srec"
+    )
+endif()
 
 #
 #  ★上の2つの add_custom_command は，それ単体では Ninja ジェネレータの
@@ -377,7 +431,7 @@ add_custom_command(
 #    書く Task 5 の判断に委ねる）。
 #
 add_custom_target(cfg1_out_syms DEPENDS ${CFG1_OUT_SYMS_FILE})
-add_custom_target(cfg1_out_srec DEPENDS ${CFG1_OUT_SREC_FILE})
+add_custom_target(cfg1_out_srec DEPENDS ${CFG1_OUT_ROM_IMAGE_FILE})
 
 #
 #  .trb は IncludeTrb("...") で他の .trb を再帰的に取り込む（例：
@@ -417,9 +471,9 @@ add_custom_command(
     WORKING_DIRECTORY ${CFG_GEN_DIR}
     COMMAND ${CFG_COMMAND} --pass 2 -O --kernel fmp
             ${CFG_INCLUDE_DIRS} ${CFG_CLASS_TRB_FILES} ${CFG_OFFSET_TRB_FILES}
-            --rom-symbol ${CFG1_OUT_SYMS_FILE} --rom-image ${CFG1_OUT_SREC_FILE}
+            --rom-symbol ${CFG1_OUT_SYMS_FILE} --rom-image ${CFG1_OUT_ROM_IMAGE_FILE}
     DEPENDS ${CFG_SCRIPT_DEPS} ${FMP3_CLASS_TRB_FILES} ${FMP3_OFFSET_TRB_FILES}
-            ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_SREC_FILE} ${CFG1_OUT_TIMESTAMP}
+            ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_ROM_IMAGE_FILE} ${CFG1_OUT_TIMESTAMP}
             ${FMP3_OFFSET_TRB_CLOSURE}
     COMMENT "Running cfg pass 2 to generate offset.h"
 )
@@ -447,7 +501,7 @@ add_custom_command(
     COMMAND ${CFG_COMMAND} --pass 2 --kernel fmp
             ${CFG_INCLUDE_DIRS} ${CFG_CLASS_TRB_FILES} ${CFG_KERNEL_CFG_TRB_FILES}
     DEPENDS ${CFG_SCRIPT_DEPS} ${FMP3_CLASS_TRB_FILES} ${FMP3_KERNEL_CFG_TRB_FILES}
-            ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_SREC_FILE} ${OFFSET_TIMESTAMP}
+            ${CFG1_OUT_SYMS_FILE} ${CFG1_OUT_ROM_IMAGE_FILE} ${OFFSET_TIMESTAMP}
             ${FMP3_KERNEL_CFG_TRB_CLOSURE}
     COMMENT "Running cfg pass 2 to generate kernel_cfg.c/h"
 )
@@ -567,6 +621,21 @@ function(fmp3_cfg_check TARGET)
             "variables to build your own add_custom_command(), the same way this "
             "function does internally.")
     endif()
+    #
+    #  ROM イメージ形式（FMP3_DUMP_FORMAT）で分岐する．cfg1_out 側
+    #  （上の add_custom_command）と同じ理由．
+    #
+    if(FMP3_DUMP_FORMAT STREQUAL "dump")
+        set(_fmp3_check_image ${CFG_GEN_DIR}/${TARGET}.dump)
+        set(_fmp3_check_image_cmd
+            ${CMAKE_COMMAND} -DOBJDUMP=${CMAKE_OBJDUMP} -DELF=$<TARGET_FILE:${TARGET}>
+            "-DDUMPOPTS=${FMP3_DUMPOPTS}" -DOUT=${_fmp3_check_image}
+            -P ${FMP3_ROOT_DIR}/cmake/objdump_to_file.cmake)
+    else()
+        set(_fmp3_check_image ${CFG_GEN_DIR}/${TARGET}.srec)
+        set(_fmp3_check_image_cmd
+            ${CMAKE_OBJCOPY} -O srec -S $<TARGET_FILE:${TARGET}> ${_fmp3_check_image})
+    endif()
     add_custom_command(TARGET ${TARGET} POST_BUILD
         WORKING_DIRECTORY ${CFG_GEN_DIR}
         COMMAND ${CMAKE_COMMAND}
@@ -574,11 +643,10 @@ function(fmp3_cfg_check TARGET)
                 -DELF=$<TARGET_FILE:${TARGET}>
                 -DOUT=${CFG_GEN_DIR}/${TARGET}.syms
                 -P ${FMP3_ROOT_DIR}/cmake/nm_to_file.cmake
-        COMMAND ${CMAKE_OBJCOPY} -O srec -S $<TARGET_FILE:${TARGET}>
-                ${CFG_GEN_DIR}/${TARGET}.srec
+        COMMAND ${_fmp3_check_image_cmd}
         COMMAND ${PASS3_ARGS}
                 --rom-symbol ${CFG_GEN_DIR}/${TARGET}.syms
-                --rom-image  ${CFG_GEN_DIR}/${TARGET}.srec
+                --rom-image  ${_fmp3_check_image}
         COMMENT "Running cfg pass 3 to check configuration"
     )
 endfunction()
