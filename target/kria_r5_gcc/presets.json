@@ -1,0 +1,41 @@
+{
+  "version": 4,
+  "include": [
+    "../../cmake/presets-base.json"
+  ],
+  "configurePresets": [
+    {
+      "name": "kria_r5",
+      "inherits": "_base",
+      "displayName": "KRIA SOM Cortex-R5F (QEMU xlnx-zcu102 RPU cluster, 1 processor / lockstep)",
+      "description": "上流Makefile.target付属のrunquレシピをそのまま踏襲。QEMU >= 11.0.1 が必要",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "FMP3_TARGET": "kria_r5_gcc"
+      }
+    },
+    {
+      "name": "kria_r5-2core",
+      "inherits": "kria_r5",
+      "displayName": "KRIA SOM Cortex-R5F (QEMU xlnx-zcu102 RPU cluster, 2 processors split mode)",
+      "description": "2コアsplitモード（TNUM_PRCID=2）",
+      "cacheVariables": {
+        "FMP3_PRC_NUM": "2"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "kria_r5",        "configurePreset": "kria_r5" },
+    { "name": "kria_r5-2core",  "configurePreset": "kria_r5-2core" },
+    {
+      "name": "run-kria_r5",
+      "configurePreset": "kria_r5",
+      "targets": [ "run" ]
+    },
+    {
+      "name": "run-kria_r5-2core",
+      "configurePreset": "kria_r5-2core",
+      "targets": [ "run" ]
+    }
+  ]
+}
