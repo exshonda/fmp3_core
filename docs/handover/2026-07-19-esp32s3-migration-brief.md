@@ -284,6 +284,26 @@ ESP-IDF は独自の specs / リンカフラグメントを持つので、**こ�
 含まれることを確認する。cfg の 3 パス構成では pass1 の出力を**リンクするが実行しない**ため、
 リンクが静かに壊れていても後段まで気づけない。そのガード。
 
+### G. ★symlink と `pwd` — あなたの構成では最も当たりやすい
+
+**この項目は、あなたのツリーが symlink 構成であるがゆえに、他のどれより当たる確率が高い。**
+
+`/home/honda/TOPPERS/esp32_s3` は `/home/honda/TOPPERS/ESP32/esp32_s3` への symlink であり、
+さらに `fmp3_trunk/arch/xtensa_gcc/*` と `fmp3_trunk/target/esp32*` が
+`esp32_s3/` 側へ張られた symlink である（`docs/repository-structure.md` の方式）。
+つまり**同じファイルに二通りのパスで到達できる**。
+
+我々はこれで実際に事故を起こした。`tools/cfg_error_tests/run.sh` が
+`pwd`（論理パス）を使っていたため、symlink 経由で呼ぶと**古い `cfg1_out.c` を
+黙ってコンパイルしていた**。エラーは出ない。検査は通る。ただし検証していたのは
+別のファイルだった。`pwd -P`（物理パス）へ揃えて解決した
+（`tools/cfg_equivalence.sh:55-61` に当時の記録がコメントで残っている）。
+
+対策: ビルドディレクトリ・ソースディレクトリを扱うスクリプトでは
+`cd "$dir" && pwd -P` で物理パスへ正規化する。CMake 側では
+`get_filename_component(... REALPATH)`。**症状が「不一致」ではなく「古いものが一致する」
+方向に出る**ため、気づくのが遅れる型である。
+
 ---
 
 ## 7. 検証の作法 — これが一番伝えたいこと
