@@ -28,11 +28,13 @@
 #include "musca_b1.h"
 
 /*
- *  SIL スピンロック（単一プロセッサ版）
+ *  SIL スピンロックは chip_sil.h で定義する
  *
- *  単一プロセッサであり，スピンロックは割込みロックと等価である．
+ *  以前はここで無条件に SIL_LOC_INT()（＝PRIMASK による割込みロック）と等価に
+ *  定義していたが，これは単一プロセッサ前提の記述であり，2 コア構成では
+ *  プロセッサ間排他にならなかった．その結果，syslog の低レベル出力が両コアで
+ *  混ざり，テストの合否マーカー文字列が分断されて自動判定が偽陰性を出していた．
+ *  chip_sil.h が TNUM_PRCID に応じて実装を切り替える．
  */
-#define SIL_LOC_SPN()  SIL_LOC_INT()
-#define SIL_UNL_SPN()  SIL_UNL_INT()
 
 #endif /* TOPPERS_TARGET_SIL_H */

@@ -164,7 +164,32 @@ extern LOCK giant_lock;
 #endif /* TMAX_NATIVE_SPN */
 
 #define initialize_native_spn(p_spninib)	initialize_lock((LOCK *)((p_spninib)->lock))
-#define lock_native_spn(p_spninib)			acquire_lock((LOCK *)((p_spninib)->lock))
+/*
+ *  ネイティブスピンロックの取得
+ *
+ *  doc/porting.txt (6-21-3-2) の要求:
+ *    「CPUロック状態で呼び出される．ハードウェアスピンロックが取得を試み，
+ *      取得できればリターンする．取得できない場合は，一旦割込みを許可した
+ *      後，再び割込みを禁止した後にハードウェアスピンロックが取得を試みる．」
+ *
+ *  従来は acquire_lock() をそのまま呼んでおり，取得できるまで CPU ロック状態の
+ *  ままスピンしていた（＝割込みを一切許可しない）．このため，待っている側の
+ *  プロセッサでタイムイベント（アラーム等）が発火できず，test_spinlock1 が
+ *  デッドロックしていた（相手プロセッサのアラームハンドラが解放の契機を作る
+ *  シーケンスのため）．
+ *
+ *  なお acquire_lock() はジャイアントロック（acquire_glock）と共用のため，
+ *  acquire_lock() 自体は変更してはならない（ジャイアントロック取得中に割込みを
+ *  許可することになる）．ここでは try_lock() を用いた再試行ループとして実装する．
+ */
+#define lock_native_spn(p_spninib)									\
+	do {															\
+		while (try_lock((LOCK *)((p_spninib)->lock))) {				\
+			unlock_cpu();											\
+			delay_for_interrupt();									\
+			lock_cpu();												\
+		}															\
+	} while (false)
 #define try_native_spn(p_spninib)			try_lock((LOCK *)((p_spninib)->lock))
 #define unlock_native_spn(p_spninib)		release_lock((LOCK *)((p_spninib)->lock))
 #define refer_native_spn(p_spninib)			refer_lock((LOCK *)((p_spninib)->lock))

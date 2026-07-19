@@ -32,12 +32,25 @@
  */
 /*
  *  FMP3 では割込み番号をプロセッサ単位（(prcid << 16) | intno）で指定する．
- *  本ターゲットは単一プロセッサ（PRC1）．
+ *
+ *  NVIC はコアごとに独立したインスタンスであり，ras_int / prb_int / clr_int は
+ *  自コアの NVIC_ISPR / NVIC_ICPR のみを操作する（arch/arm_m_gcc/common/
+ *  core_kernel_impl.h）．したがって未接続の予備 IRQ は，生の IRQ 番号を PRC1 と
+ *  同じにしたまま上位16bitのプロセッサIDだけを変えて PRC2 にも割り当てられる．
+ *
+ *  INTNO2 は sample1 が 2 コア構成で inthd_no[] から無条件に参照するため必須．
  */
 #define INTNO1			((1U << 16) | (60U + 16U))	/* PRC1, 予備NVIC IRQ60 → INTNO 76 */
 #define INTNO1_INTATR	TA_ENAINT
 #define INTNO1_INTPRI	(-2)
 #define intno1_clear()
+
+#if TNUM_PRCID >= 2
+#define INTNO2			((2U << 16) | (60U + 16U))	/* PRC2, 予備NVIC IRQ60 → INTNO 76 */
+#define INTNO2_INTATR	TA_ENAINT
+#define INTNO2_INTPRI	(-2)
+#define intno2_clear()
+#endif /* TNUM_PRCID >= 2 */
 
 /*
  *  コア依存モジュール（ARM-M 用）

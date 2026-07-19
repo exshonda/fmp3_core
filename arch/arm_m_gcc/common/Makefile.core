@@ -61,4 +61,19 @@ TARGET_OFFSET_TRB = $(COREDIR)/core_offset.trb
 #  offset.timestamp への順序専用依存を付与する（遅延展開のため = を用い，
 #  OBJDIR 付与後の最終リストを参照する）．
 #
-OFFSET_COBJS = $(KERNEL_COBJS) $(SYSSVC_COBJS) $(APPL_COBJS)
+#
+#  CFG_COBJS（kernel_cfg.o）も対象に含める必要がある．
+#
+#  kernel_cfg.c は kernel_impl.h 経由で offset.h を取り込む（コンパイラが生成する
+#  kernel_cfg.d に offset.h が現れることで確認できる）．しかも kernel_cfg.timestamp
+#  と offset.timestamp は互いに依存せず，同じ前提条件（cfg1_out.db / .syms / .dump）
+#  を持つため make -j では任意の順序で並列に走る．kernel_cfg.timestamp が先に
+#  完了すると kernel_cfg.c が生成され，offset.h の生成を待たずに kernel_cfg.o の
+#  コンパイルが始まってレース失敗する（fatal error: offset.h: No such file）．
+#  .d ファイルはビルド成功後にしか存在しないため，クリーンビルドの初回は
+#  この順序専用依存が唯一の防御となる．
+#
+#  なお cfg1_out.o は CFG_COBJS ではなく ALL_CFG_COBJS 側にあり，CFG1_OUT 定義時は
+#  core_kernel_impl.h が offset.h を取り込まないため，ここに含めなくてよい．
+#
+OFFSET_COBJS = $(KERNEL_COBJS) $(SYSSVC_COBJS) $(APPL_COBJS) $(CFG_COBJS)

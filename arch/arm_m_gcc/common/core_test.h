@@ -49,6 +49,26 @@
 
 /*
  *  チップで共通な定義
+ *
+ *  ★既知の制限（ARM アーキテクチャ由来。移植の不具合ではない）
+ *
+ *  PRIMASK がセットされた状態（SIL_LOC_INT() 実行後）で発生した設定可能フォールト
+ *  （UsageFault 等）は，ARM アーキテクチャの規定により必ず HardFault（例外番号 3）
+ *  へエスカレートする．このため，例外を起こす直前に SIL_LOC_INT() を実行する
+ *  test_cpuexc1 / test_cpuexc4 は，下記の CPUEXC1_* を UsageFault（6）で登録して
+ *  いる限り ARM-M では成立せず，"Unregistered Exception, Excno = 3" となる．
+ *
+ *  一方 test_cpuexc2 は loc_cpu()（ARMv7-M 以降では BASEPRI）を用いるためエスカ
+ *  レートせず，UsageFault が登録どおり配送されて PASS する．すなわち同一の
+ *  CPUEXC1_* をどちらの値にしても一方が成立しなくなる構造であり，値の変更では
+ *  解決できない．
+ *
+ *  この差は Thumb バージョンでは判別できない（PRIMASK を使うか BASEPRI を使うかは
+ *  テスト側の記述による）ため，下記の分岐は「ARMv6-M には設定可能フォールトが無い」
+ *  という点のみを表している．
+ *
+ *  本件は musca_b1_gcc / rp2350_pico2_gcc の双方で同一の結果となることを実機・
+ *  QEMU で確認済みであり，ターゲット固有ではない（2026-07-19）．
  */
 #if __TARGET_ARCH_THUMB >= 4
 #   define CPUEXC1_PRC1 ((1 << 16) | 6) /* Usage fault */

@@ -71,4 +71,22 @@ SECTIONS
         . = ALIGN(4);
         __noinit_end = .;
     } > RAM
+
+    /*
+     *  ヒープ領域
+     *
+     *  newlib のシステムコールスタブ（libnosys の _sbrk）は，ヒープの開始位置
+     *  を示すシンボル end をリンカスクリプトから与えられることを前提とする．
+     *  これが無いと，stdio の reent 経路を引き込むアプリケーション
+     *  （test_mtrans2 / test_mtrans5 等）が `undefined reference to \`end'` で
+     *  リンクできない．RAM の最後の割付け（.noinit）の直後をヒープ開始とする．
+     *
+     *  PROVIDE を用いるのは，アプリケーション側で独自に定義した場合に，
+     *  そちらを優先させるためである．
+     */
+    . = ALIGN(8);
+    PROVIDE(end = .);
+    PROVIDE(_end = .);
+    PROVIDE(__heap_start = .);
+    PROVIDE(__heap_limit = ORIGIN(RAM) + LENGTH(RAM));
 }
