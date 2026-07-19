@@ -13,6 +13,22 @@ IncludeTrb("kernel/genoffset.py")
 #
 #  フィールドのオフセットの定義の生成
 #
+#  RISC-Vでは T_EXCINF 構造体に cpsr フィールドが無く，PCB にも例外ネスト
+#  カウンタ（PCB_exncnt）が無いため，$offsetof_T_EXCINF_cpsr / $offsetof_PCB_exncnt
+#  はどこにも代入されない．Ruby版では未代入の $グローバル変数を参照すると
+#  nilになり，文字列展開（#{...}）では空文字列として出力される
+#  （実測: `#define T_EXCINF_cpsr\t`／`#define PCB_exncnt\t\t` のように
+#  値部分が空のまま出力される）。Pythonでは未定義グローバル参照はNameError
+#  になるため，Ruby のnil展開結果と同じ空文字列をここで明示的に補う
+#  （core_kernel.pyのUSE_INTCFG_TABLEガードと同種の対策だが，あちらは
+#  真偽値として使うのでFalseを補っている．こちらは文字列展開に使うため
+#  空文字列""を補う必要があり，Falseを補うと出力が"False"になってしまう）．
+#
+if "offsetof_T_EXCINF_cpsr" not in globals():
+    offsetof_T_EXCINF_cpsr = ""
+if "offsetof_PCB_exncnt" not in globals():
+    offsetof_PCB_exncnt = ""
+
 offsetH.append(f"""\
 #define TCB_p_tinib\t\t{offsetof_TCB_p_tinib}
 #define TCB_sp\t\t\t{offsetof_TCB_sp}
