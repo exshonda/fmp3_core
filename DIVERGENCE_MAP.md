@@ -223,6 +223,82 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
   問題なく出力されることを確認済みで、事前調査が挙げたもう一つのリスク
   （PMU_GLOBAL ポーリング）も実害としては顕在化しなかった。
 
+- **（2026-07-19 検証完了）`kria_r5_gcc`（Cortex-R5F, RPUクラスタ）のQEMU実行検証
+  （Task 12、上流`runqu`レシピの翻訳）。1コア（lockstep相当）・2コア（split mode）とも
+  pristine 無改変で動作を確認した。**
+
+  QEMUバージョン：`/home/honda/qemu-build/qemu-11.0.1/build-a64/qemu-system-aarch64
+  --version` → `QEMU emulator version 11.0.1`（brief記載値と一致）。
+
+  1コア（`kria_r5` プリセット、`target.cmake` の `FMP3_RUN_COMMAND` そのまま＝上流
+  `runqu` の翻訳）：`timeout 20 qemu-system-aarch64 -M xlnx-zcu102 -smp 6 -m 2G
+  -nographic -global xlnx-zynqmp.boot-cpu=rpu-cpu[0] -global
+  cortex-r5f-arm-cpu.mp-affinity=0 -device loader,file=build/kria_r5/fmp,cpu-num=4
+  -serial null -serial mon:stdio -d guest_errors,unimp` → rc=124（タイムアウトに
+  よる正常継続）。`TOPPERS/FMP3 Kernel Release 3.4.0 for KR260 <Cortex-R5F> ...`
+  バナー・`Processor 1 start.`・サンプルタスクの周期出力（20秒で44回)まで到達。
+  `-d guest_errors,unimp` のログに `RPU_RPU_GLBL_CNTL`（`0xFF9A0000`）付近の
+  異常アクセスは一切出力されなかった。**brief Step 3 の`TOPPERS_USE_QEMU`ガードは
+  不要と判断し、pristine（`target_kernel_impl.c`）は無改変のまま。**
+
+  2コア（`kria_r5-2core` プリセット、split mode, `FMP3_PRC_NUM=2`）：**brief Step 4 の
+  提案コマンド（`-device loader` を `cpu-num=4`/`cpu-num=5` に2個並べるだけ）は
+  そのままでは動かないことを実測で確認した**（brief記載の通り上流に前例が無い構成で
+  あり，確信度が低いとの前置きは正しかった／このコマンド自体は誤り）。このコマンドで
+  実行すると `timeout 20` で rc=124 になるが，バナーが**1行も**出力されない
+  （1コアの rc=124＝正常継続とは似て非なる「無反応のハング」）。原因切り分けのため
+  `-device loader` を `cpu-num=4` のみ（2コアビルドのバイナリを1コア同様に単独起動）
+  にしても同じく無反応であることを確認し，2個目の `-device loader` 自体が原因では
+  ないと判定した。`kernel/startup.c` の `barrier_sync()`（`TOPPERS_barsync`,
+  複数箇所で `barrier_sync(1)`〜`barrier_sync(7)` を呼ぶ）が `TNUM_PRCID`（=2）個の
+  プロセッサ全員の到達を待つ設計のため，RPU1（PRC2）が実行を始めない限り RPU0（PRC1）
+  はバナー出力前の最初のバリアで無期限に停止する，と推測した。
+
+  QEMU側の原因を特定：`hw/arm/xlnx-zynqmp.c`（`/home/honda/qemu-build/qemu-11.0.1/
+  hw/arm/xlnx-zynqmp.c:242-267`）は，`boot-cpu` に指定されなかった RPU を既定で
+  `start-powered-off=true`（電源断状態で生成）にする。コード中コメント：
+  「Secondary CPUs start in powered-down state. When the "rpu-secondary-start"
+  machine property is set, they instead start running from reset together with
+  the boot CPU, which allows running an SMP guest on the RPU cluster under QEMU
+  (there is no model of the LPD/CRL reset registers that the guest would
+  otherwise use to release them).」（同ファイル254-260行）。すなわち実機では
+  ソフトウェア（ブートローダ等）が LPD/CRL のリセット制御レジスタを叩いて RPU1 を
+  解放するが，QEMU の xlnx-zynqmp モデルはそのレジスタ群を実装していないため，
+  ゲスト側の操作では RPU1 を起こせない。`rpu-secondary-start`
+  （`DEFINE_PROP_BOOL`、同ファイル949-950行）という machine property を立てる
+  ことでのみ RPU1 が RPU0 と同時に reset から動き出す。
+
+  `-global xlnx-zynqmp.rpu-secondary-start=true` を追加した以下のコマンドで
+  再実行したところ，`Processor 1 start.` / `Processor 2 start.` の2行・
+  両プロセッサのサンプルタスク周期出力（`TASK1_1`/`TASK2_1`）が安定して継続する
+  ことを確認した（20秒実行で両プロセッサとも進行を継続、40秒（`timeout -k 5 40`）の
+  再実行でも同様に PRC1/PRC2 とも カウント100まで進行し，フォールト・停止なし。
+  `ps -eo pid,comm | grep qemu-system` で残存プロセス無しも確認）：
+  ```
+  qemu-system-aarch64 -M xlnx-zcu102 -smp 6 -m 2G -nographic \
+      -global xlnx-zynqmp.boot-cpu=rpu-cpu[0] \
+      -global xlnx-zynqmp.rpu-secondary-start=true \
+      -global cortex-r5f-arm-cpu.mp-affinity=0 \
+      -device loader,file=build/kria_r5-2core/fmp,cpu-num=4 \
+      -device loader,file=build/kria_r5-2core/fmp,cpu-num=5 \
+      -serial null -serial mon:stdio -d guest_errors,unimp
+  ```
+  musca_b1 の2コア事例（HardFaultで停止）と異なり，**kria_r5 の2コアは真の意味で
+  安定動作した**。pristine 側の改修は一切不要だった（`target_kernel_impl.c` は
+  無改変）。**`target.cmake` の `FMP3_RUN_COMMAND`（1コア用）はこのタスクの
+  scope外につき未変更のまま**（brief の Files 節が `DIVERGENCE_MAP.md` のみを
+  変更対象としているため）。2コア用の `cmake --build ... --target run` を
+  今後整備する場合は，上記コマンド（`-device loader` 2個＋
+  `-global xlnx-zynqmp.rpu-secondary-start=true`）を `target.cmake` 側に
+  追加する対応が必要になる（現状のまま `kria_r5-2core` プリセットで
+  `--target run` を実行すると，1コア用の `FMP3_RUN_COMMAND` が使われるため
+  上記の「無反応のハング」を踏む）。
+
+  回帰確認：他5ターゲット（`musca_b1`／`musca_b1-2core`／`polarfire_soc_kit-qemu`／
+  `kria_arm64`／`kria_arm64-1core`／`rp2350_pico2`）を全て `rm -rf build/<preset>`
+  してから configure・build し直し，全て configure rc=0・build rc=0・`fmp`
+  生成物ありを確認した（regression無し）。
+
 ## 未解決事項（強い証拠はあるが断定はしない）
 
 - **（2026-07-19 発見）`target/musca_b1_gcc/target_timer.c` の `hrt_clear_event_body()`
