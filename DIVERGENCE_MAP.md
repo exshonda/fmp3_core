@@ -80,6 +80,37 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
   部分的に補っているが、`cfg_equivalence.sh` 単体の「一致」は `clsid` については無検証である
   ことを踏まえて読むこと。
 
+- **（2026-07-19 外部レビュー指摘）`kria_arm64_gcc` を将来追加する際は ROM イメージ形式の
+  フックが要る。** 現物を確認した：上流 `arch/arm64_gcc/common/Makefile.core:34` は
+  `DUMP = dump` と定義し（他アーキではこの変数は既定で `sample/Makefile:133-134` の
+  `ifndef DUMP: DUMP = srec` が効く）、`sample/Makefile` 側は `cfg1_out.$(DUMP)` という
+  拡張子可変のファイル名で kernel_cfg 生成（`:402-406` 相当）・offset.h 生成（`:417-421` 相当）
+  の両方の `--rom-image` 引数を切り替え、`cfg1_out.dump:` ルール（`$(OBJDUMP) -s $(DUMPOPTS)
+  $(CFG1_OUT) > cfg1_out.dump`）が `.dump` 生成を担う。kria は `DUMPOPTS := -j .text -j
+  .rodata` を使う。一方 CMake 汎用層（`CMakeLists.txt`）はこの可変性を持たず、
+  `-O srec`／`.srec` 拡張子を決め打ちしている（`cfg1_out.srec` 生成: `:361-366`、
+  offset.h 生成の `--rom-image`: `:418-420`、`fmp3_cfg_check()` の `--rom-image`:
+  `:538-543`。いずれも実際にこの3箇所であることをこの修正時に確認済み）。
+  受け側の `cfg_py/srecord.py`／`cfg_py/cfg.py:700-705` は `args.rom_image_file_name` の
+  拡張子が `.srec` かどうかで `SRecord(..., "srec")` と `SRecord(..., "dump")` を切り替える
+  実装が既にあり、**欠けているのは CMake 層の DUMP 変数フック（`objcopy -O srec` /
+  `objdump -s` の分岐と `--rom-image` の拡張子切り替え）だけ**である。現5ターゲット
+  （polarfire・musca_b1×2）はいずれも `srec` 系のみを使うため無害。kria_arm64_gcc を
+  実装する時点で対応すること。
+
+- **（2026-07-19 外部レビュー指摘）コンパイルオプションの結合順が上流と逆。** 現物を確認した：
+  上流 `sample/Makefile:188` は `COPTS := -O2 $(COPTS)`（`-O2` を**先頭に**追加し、
+  target 側が `Makefile.target` 等で後から積む `COPTS` はその**後ろ**に来る＝GCCの
+  「最後に指定した `-O` が勝つ」規則により target 側が `-O2` を上書き可能）。一方
+  `CMakeLists.txt` は `include(${FMP3_TARGET_DIR}/target.cmake)`（`:81`）で
+  `FMP3_COMPILE_OPTIONS` に target 固有の最適化オプションが積まれた**後**に
+  `list(APPEND FMP3_COMPILE_OPTIONS -g -Wall -O2)`（`:137`）を実行しており、
+  `-O2` が target.cmake の指定より**後**＝上書きする側になる。上流と逆順。
+  現5ターゲットの `target.cmake` はいずれも独自の `-O` を指定しない（`FMP3_COMPILE_OPTIONS`
+  に `-Os`/`-O0` 等を積んでいない）ため実害は無いが、将来 target.cmake 側で
+  `-Os`/`-O0` 等に上書きしたいターゲットを追加すると、上流と違って上書きできない
+  （常に `-O2` に戻される）ことになる。対処は本レビュー対応のスコープ外と判断し記録に留める。
+
 ## 解消済み事項
 
 - **（2026-07-19 解消）`cfg_py/cfg.py`（計画Aの中身）が pristine の `cfg/cfg.rb` へ委譲する薄いシムであった件。**
@@ -142,6 +173,14 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
     判断待ち）。1コア構成（`musca_b1` プリセット）はこの問題の影響を受けず正常動作する。
 
   </details>
+
+- **（2026-07-19 解消）`kernel/interrupt.py` の `INTNO_VALID_ALL` 等3変数が
+  `list(set(...))` で構築され、Ruby版（`.values.flatten.uniq`、出現順保存）と違い順序不定
+  だった件。** 外部レビュー指摘。現状はこの3変数が `in` によるメンバーシップ判定にしか
+  使われておらず（本ファイル中で確認済み）実害は無かったが、将来これらを列挙生成に使うと
+  Rubyと出力順が食い違いうる潜在的な地雷だったため、`list(dict.fromkeys(...))`
+  （出現順を保った重複除去、Rubyの`.uniq`と同義）に置き換えて解消した
+  （`kernel/interrupt.py`、修正3のコミットと同時に対応）。
 
 ## 未解決事項（強い証拠はあるが断定はしない）
 
