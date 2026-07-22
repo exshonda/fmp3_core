@@ -406,9 +406,14 @@ for prcid in range(1, TNUM_PRCID + 1):
                         sorted(isrParamsList, key=lambda p: p["isrpri"].val)):
                     if index > 0:
                         kernelCfgC.add()
-                        kernelCfgC.add("\tif (_kernel_sense_lock()) {")
+                        #  ★sense_lock / unlock_cpu は kernel_rename.h の
+                        #  rename 表に無い（Inline 関数で大域シンボルを作らない
+                        #  ため rename が不要）。したがって `_kernel_` 接頭辞を
+                        #  付けると未宣言になる。実関数である force_unlock_spin
+                        #  だけが rename される（kernel_rename.h:124）。
+                        kernelCfgC.add("\tif (sense_lock()) {")
                         kernelCfgC.add("\t\t_kernel_force_unlock_spin(p_my_pcb);")
-                        kernelCfgC.add("\t\t_kernel_unlock_cpu();")
+                        kernelCfgC.add("\t\tunlock_cpu();")
                         kernelCfgC.add2("\t}")
                     kernelCfgC.add(f"\tLOG_ISR_ENTER({params['isrid']});")
                     kernelCfgC.add(f"\t((ISR)({params['isr']}))"
