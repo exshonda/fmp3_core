@@ -406,14 +406,33 @@ for prcid in range(1, TNUM_PRCID + 1):
                         sorted(isrParamsList, key=lambda p: p["isrpri"].val)):
                     if index > 0:
                         kernelCfgC.add()
-                        #  ★sense_lock / unlock_cpu は kernel_rename.h の
-                        #  rename 表に無い（Inline 関数で大域シンボルを作らない
-                        #  ため rename が不要）。したがって `_kernel_` 接頭辞を
-                        #  付けると未宣言になる。実関数である force_unlock_spin
-                        #  だけが rename される（kernel_rename.h:124）。
-                        kernelCfgC.add("\tif (sense_lock()) {")
+                        #  ★2026-07-24 再訂正: `_kernel_` 接頭辞を付ける形へ戻した。
+                        #
+                        #  【前の版（83a14be）が誤っていた理由】
+                        #  「sense_lock / unlock_cpu は Inline なので rename 対象外」
+                        #  という根拠は **xtensa と arm_m にしか当てはまらない**。
+                        #  riscv_gcc / arm_gcc / arm64_gcc の core_rename.def は
+                        #  lock_cpu / unlock_cpu / sense_lock を rename しており、
+                        #  kernel_cfg.c は kernel_int.h 末尾の unrename 連鎖の**後**に
+                        #  置かれるため、これらの arch では Inline 実体が
+                        #  `_kernel_sense_lock` 名で定義される。素名で出力すると
+                        #  implicit declaration で落ちる（＝壊れる arch 集合を
+                        #  入れ替えただけだった）。
+                        #
+                        #  【`_kernel_` が正しいことの根拠（★仕様書が条文で規定）】
+                        #  doc/configurator.txt §4.7.1.2「割込みハンドラの生成」
+                        #  1338-1339 / 1346-1347 行が、生成すべきコードとして
+                        #      if (_kernel_sense_lock()) {
+                        #          _kernel_unlock_cpu();
+                        #      }
+                        #  をそのまま掲げている。interrupt.trb:462-464 も同じ。
+                        #  ⇒ 真の欠陥は「arm_m と xtensa の core_rename.def に
+                        #     lock_cpu/unlock_cpu/sense_lock のエントリが欠けている
+                        #     **非一貫性**」の側であり、本ポートは xtensa 側の
+                        #     core_rename.def を補って解消した。arm_m は上流へ報告する。
+                        kernelCfgC.add("\tif (_kernel_sense_lock()) {")
                         kernelCfgC.add("\t\t_kernel_force_unlock_spin(p_my_pcb);")
-                        kernelCfgC.add("\t\tunlock_cpu();")
+                        kernelCfgC.add("\t\t_kernel_unlock_cpu();")
                         kernelCfgC.add2("\t}")
                     kernelCfgC.add(f"\tLOG_ISR_ENTER({params['isrid']});")
                     kernelCfgC.add(f"\t((ISR)({params['isr']}))"
