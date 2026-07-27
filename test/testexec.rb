@@ -93,6 +93,7 @@ TEST_SPEC = {
   "flg1"     => { SRC: "test_flg1" },
   "hrt1"     => { SRC: "test_hrt1" },
   "int1"     => { SRC: "test_int1" },
+  "int2"     => { SRC: "test_int2" },
   "mpf1"     => { SRC: "test_mpf1" },
   "mutex1"   => { SRC: "test_mutex1", CDL: "test_pf_bitkernel" },
   "mutex2"   => { SRC: "test_mutex2", CDL: "test_pf_bitkernel" },

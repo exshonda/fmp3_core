@@ -52,6 +52,9 @@ test_hrt1.h
 test_int1.c
 test_int1.cfg
 test_int1.h
+test_int2.c
+test_int2.cfg
+test_int2.h
 test_malarm1.c
 test_malarm1.cfg
 test_mmutex1.c
