@@ -33,7 +33,48 @@ storm を止める唯一の `task2_flag=false` に到達できない自己保持
 - CLIC マスク窓: mil=0 / THRESH=0 / CLIC_INT_CTRL(3) IE=1，CTL=0xff → level7 > mil0 かつ > THRESH0
 - 可視性順序バグ: release/acquire fence 追加後も解消せず
 
-PolarFire(RV64GC) では mtrans2 が完走 → 割込み1回コストが低く飽和しない → P4 固有問題．
+~~PolarFire(RV64GC) では mtrans2 が完走 → 割込み1回コストが低く飽和しない → P4 固有問題．~~
+
+**★2026-07-19 訂正: 「P4 固有問題」は誤りだった．同じ livelock が全ターゲットで発現する．**
+
+複数ターゲットの実機で対照実験（同一ボード・同一セッションで `TEST_DELAY_TIME_NSE` のみを
+変えた比較）を行った結果，本 livelock は **アーキテクチャにも割込みコントローラにも依存しない**
+ことが確認された．
+
+| ターゲット | 割込みコントローラ | 10U | 300U | 1000U |
+|---|---|---|---|---|
+| zybo_z7_gcc (Cortex-A9) | GIC-400 (GICv2) | DONE | — | — |
+| kria_arm64_gcc (A53) | GIC-400 (GICv2) | HANG 3/3 | DONE 3/3 | — |
+| stm32mp257f_dk (A35) | GIC-400 (GICv2) | HANG 3/3 | DONE 3/3 | — |
+| imx8mm_evk (A53) | **GICv3** | HANG 2/2 | DONE 3/3 | — |
+| polarfire_soc_kit (U54) | **PLIC+CLINT (RISC-V)** | — | **HANG 3/3** | **DONE 3/3** |
+
+実測した signature も一致する（PolarFire, PRC_NUM=2, 300U, 7点サンプリング）:
+- 被害コア(PRC1): 6/7 が IPI・割込み経路（`msi_handler` ×3 / `core_int_entry_*` ×3），
+  残り 1 点が `dispatcher_2`（＝戻れてはいるが即座に引き戻される）
+- 加害コア(PRC2): 7/7 がテストループ（`task2` / `make_non_runnable` / `sus_tsk` / `sil_dly_nse1`）
+- `CLINT MSIP[PRC1]` が **7/7 で 1**（処理中に常に次の IPI が pending）
+
+ARM64 側（stm32mp257, 10U）でも同型: 被害コア 8/8 が割込み入口・出口
+（`cur_spx_irq_handler`/`irq_handler_*`/`irc_begin_int`/`irc_end_int`），
+加害コア 8/8 がテストループ．
+
+**観測上の注意**: JTAG で halt すると storm が止まり，被害コアは `dispatcher_2` に落ち着く．
+halt 保持したまま観測すると「アイドルで固着し IPI が配送されない」ように見え，別現象と
+誤認する（実際に imx8mm で一度誤認した）．attach/detach を繰り返す方式か RAM カウンタを使うこと．
+
+**現状の対処と残課題**:
+- 各ターゲットは `target_test.h` の `TEST_DELAY_TIME_NSE` 引き上げで回避している
+  （必要値: zybo=既定10Uで可 / kria・stm32mp257・imx8mm=300U / polarfire=1000U）．
+  **これは閾値依存の回避策であり根治ではない．** 必要値がターゲット・コア数・ボードで
+  変わること自体がその証拠（polarfire は 4 コア時 300U で完走した記録があるが，
+  Discovery Kit・2 コアでは 300U で HANG する）．
+- **根治は本書 §1 の backoff breaker の共通化**（現状 `USE_RISCV_DIRECT_TRAP` ガード内のみ）．
+- **未修正の順序問題**: `update_schedtsk_dsp()` の `memory_barrier()` は `p_schedtsk` ストアの
+  *前* にあり，ストアと IPI 発行の *間* にバリアが無い（§4.1）．esp32p4 では lost wakeup の
+  実害が観測され sender release fence を追加したが，**同じ穴は polarfire にも ARM64 にも
+  残っている**（ARM64 は GICD_SGIR への device write が先行する通常メモリのストアと
+  順序付けられる保証がない）．リリースタグ(3.4.0)への適用は影響が大きいため trunk 側で要検討．
 
 **根治**: `arch/riscv_gcc/common/msi_ipi.c`（`USE_RISCV_DIRECT_TRAP` ガード）の msi_handler 入口に
 **escalating 有界 backoff breaker** を追加．
@@ -191,3 +232,35 @@ FMP3 共通/カーネル（参照ツリー，原則変更しない）:
 - `arch/riscv_gcc/common/msi_ipi.c`, `msi_ipi.h` — msi_handler（backoff breaker 追加）/ request_dispatch_prc
 - `arch/riscv_gcc/common/core_support.S` — ディスパッチ/割込み入口・出口・アイドル（CLIC 経路は USE_RISCV_DIRECT_TRAP）
 - `arch/riscv_gcc/polarfire_soc/` — 参考 RISC-V SMP（PLIC+CLINT）実装．比較対象．
+
+---
+
+## 7. branch 3.4 での storm 回避コード要否の再検証（2026-07-20）
+
+本書 §1 の storm 回避（backoff breaker / msip coalescing）が **branch 3.4（`^/branches/3.4`）＋
+現行 ESP-IDF v5.5.4 でも必要か**を実機で再検証した（m5stamp_esp32p4, PRC_NUM=2, TEST_DELAY_TIME_NSE=10U）。
+各対策を実験用 `-D` で無効化して test_mtrans2 を反復:
+
+| 構成（10U） | 結果 |
+|---|---|
+| backoff breaker ON + coalescing ON（現状） | DONE |
+| **backoff breaker OFF**（`CLIC_STORM_BACKOFF_UNIT=0`） + coalescing ON | **6/6 DONE** |
+| **backoff breaker OFF + coalescing OFF**（`NO_MSIP_COALESCE`） | **8/8 DONE**（全 boot 確認） |
+
+※ fence（release/acquire, `raise_msip`/`clear_msip`）は無効化していない（lost-wakeup の正しさ修正で storm とは別件）。
+
+**結論**: **現行 branch 3.4 では，backoff breaker も coalescing も無しで mtrans2 は 10U を安定して通る**
+（両 OFF で 8/8）。よって §1 の storm 回避は **現状 mtrans2 を通すためには不要**．
+
+**§1（決定論的ハング）との食い違いの解釈**（未確定・向こう＝esp32_p4 repo で要調査）:
+- §1 は esp32_p4 開発リポジトリでの観測．branch 3.4 はマージ/整理で dispatch/IPI/CLIC 経路が
+  異なり livelock 感受性が消えた可能性（要差分特定）．
+- livelock は timing 敏感（Heisenbug）．現行 toolchain の timing では発火しないだけの可能性も
+  完全には否定できない（が両 OFF で 8/8 は強い）．
+- 一般解析（storm 周期 < dispatch 完了遅延 で livelock）と arm 3ボード実測は
+  `test/mtrans2_livelock_analysis.md` にまとめ済み．他ボードは TEST_DELAY_TIME_NSE 引き上げで回避＝
+  esp32p4 だけカーネル側 fix を持つのは非対称．
+
+**方針**: fence は残す（正しさ）。backoff breaker（重い escalating 版）は現状“効いていない”＝
+削除/簡素化候補．削除前に「branch 3.4 が livelock しない理由（esp32_p4 repo との差分）」を1点特定して
+timing による偶然マスクでないことを確認する。**残りの調査・コード整理は esp32_p4 リポジトリ側で進める。**

@@ -1,5 +1,11 @@
 # fmp3_archive の固定コミット SHA（import_upstream.sh が案内する値を記録）
-# ref: rp2350_pico2_gcc-20260719（release/3.4 の先端。indep は 3.4.0 のまま、
-#      musca_b1/rp2350_pico2 の simple パッケージのみ 20260719 に更新）
+# ref: polarfire_soc_kit_gcc-20260729（release/3.4 の先端）
+#   - indep（非依存部）を公開版 3.4.0（20260729）へ再取り込み。ただし
+#     kernel/include/syssvc/library の C ソース内容は前 pin(20260719)と
+#     バイト同一（20260718 内部スナップショット→公開版の再ラベルのため）。
+#     本来 indep は据え置く運用だが、今回は例外的に共通部も更新した。
+#   - 実体差分は polarfire_soc_kit ターゲット（*.h / run_test.sh 等）と
+#     arch/riscv_gcc/common/core_sil.h（mstatus MIE 操作の inline asm に
+#     "memory" clobber を追加）、test/ ・ utils/gdb_os_aware/（上流の新ツール）。
 # 取り込んだ target は tools/upstream_targets.txt を参照（5 個のみ）
-b59797f14dedcb07020f96895903ca7fcd14a4af
+882bbe42bfbba18bd22690cc1b4ee82a4612ad2e

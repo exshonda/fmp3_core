@@ -94,10 +94,13 @@
 #define USE_UART0
 
 /*
- *  微少時間待ちのための定義（本来はSILのターゲット依存部）(ToDo)
+ *  微少時間待ちのための定義（本来はSILのターゲット依存部）
+ *  2026-07-20: test_dlynse 実機校正（U54 600MHz）。旧値 70/44 は zybo 流用の
+ *  未校正値で約8倍 under-deliver（要求2270ns→実測273ns）していた。Discovery Kit と
+ *  同一の U54@600MHz のため Discovery と同じ 6/3 に統一（conservative: delivered>=requested）。
  */
-#define SIL_DLY_TIM1    70
-#define SIL_DLY_TIM2    44
+#define SIL_DLY_TIM1    6
+#define SIL_DLY_TIM2    3
 
 #endif /* MPFS_ICICLE_KIT */
 

@@ -122,6 +122,9 @@ utils/applyrename.rb
 utils/genrename.rb
 utils/gentest.rb
 utils/makerelease.rb
+utils/gdb_os_aware/os_awareness.py
+utils/gdb_os_aware/README.md
+utils/gdb_os_aware/CLAUDE.md
 
 sample/Makefile
 sample/sample1.c
