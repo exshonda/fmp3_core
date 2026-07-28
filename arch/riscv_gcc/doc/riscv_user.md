@@ -119,6 +119,11 @@ RISC-Vコア依存部は，すべての処理単位でFPUを使用できるよ�
 		- u54mc_memo.md			U54-MCのアーキテクチャに関するメモ
 
 # バージョン履歴
+## 2026/07/28
+- common/core_sil.h
+  - TOPPERS_set_mstatus_mie()/TOPPERS_clear_mstatus_mie()でmstatusの操作に
+    対して，メモリクローバ（"memory"）のつけ忘れを修正．
+
 ## 2026/06/29
 ESP32-P4（RV32，CLIC モード，SMP）移植に伴う common 部の変更．CLIC 依存部を
 PLIC と対等な共通部として追加し，トラップ復帰機構を CLIC 非依存に保った．

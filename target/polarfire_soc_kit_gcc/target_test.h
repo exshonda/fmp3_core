@@ -54,8 +54,20 @@
  *  コストが大きいマルチコアでは被害側コアが IPI 処理で飽和してライブロックする
  *  （実機で確認）．バックオフを実効化するため値を大きくする（zcu102/kria と同様）．
  *  U54（4 コア）では 300 で安定して完走することを実機で確認した（5 回試行）．
+ *
+ *  ★2026-07-19 追記: 300U では不足するケースを実機で確認したため 1000U に引き上げた．
+ *    PolarFire SoC Discovery Kit / PRC_NUM=2 で mtrans2 が 300U では HANG 3/3，
+ *    1000U では DONE 3/3（いずれも同一ボード・同一セッションでの対照実験）．
+ *    上記「300 で完走（5 回試行）」の記録とは条件が異なる（当時の記録は 4 コア．
+ *    今回は Discovery Kit・2 コア）ため，両方の観測を残す．必要な値が構成によって
+ *    変わること自体が，本回避策が閾値依存であることを示している．
+ *
+ *  ※本設定はライブロックの回避策であって根治ではない．真因と根治については
+ *    arch/riscv_gcc/esp32p4/mtrans2_lost_wakeup_analysis.md を参照．
  */
-#define TEST_DELAY_TIME_NSE 300U
+#ifndef TEST_DELAY_TIME_NSE
+#define TEST_DELAY_TIME_NSE 1000U
+#endif /* TEST_DELAY_TIME_NSE */
 
 /*
  *  コアで共通な定義（チップ依存部は飛ばす）

@@ -90,7 +90,7 @@ Inline void
 TOPPERS_set_mstatus_mie(void)
 {
     ulong_t tmp;
-    Asm("csrrs %0, mstatus, %1" : "=r"(tmp) : "r"(0x08U));
+    Asm("csrrs %0, mstatus, %1" : "=r"(tmp) : "r"(0x08U) : "memory");
 }
 
 /*
@@ -100,7 +100,7 @@ Inline void
 TOPPERS_clear_mstatus_mie(void)
 {
     ulong_t tmp;
-    Asm("csrrc %0, mstatus, %1" : "=r"(tmp) : "r"(0x08U));
+    Asm("csrrc %0, mstatus, %1" : "=r"(tmp) : "r"(0x08U) : "memory");
 }
 
 /*

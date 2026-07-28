@@ -216,4 +216,4 @@ softconsole/sample1/sample1_start-platform-and-debug.launch
 softconsole/sample1/.settings/language.settings.xml
 softconsole/sample1/.settings/org.eclipse.cdt.codan.core.prefs
 softconsole/sample1/objs/
-
+tools/run_test.sh

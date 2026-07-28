@@ -36,7 +36,7 @@
 #  アの利用により直接的または間接的に生じたいかなる損害に関しても，そ
 #  の責任を負わない．
 # 
-#  $Id: testexec.rb 484 2026-06-13 15:00:56Z ertl-honda $
+#  $Id: testexec.rb 584 2026-07-20 07:27:28Z ertl-honda $
 # 
 
 # 【実行方法】
@@ -127,6 +127,11 @@ TEST_SPEC = {
   "mmutex1"  => { SRC: "test_mmutex1" },
   "malarm1"  => { SRC: "test_malarm1" },
   "mstress1" => { SRC: "test_mstress1" },
+
+  # コア間 sus_tsk/rsm_tsk ディスパッチ遅延計測（histogram を CNTPCT/ns で使用）
+  #   histogram.o は各ターゲットの TARGET_OPTIONS の -S に含める（SYSOBJ の二重 -S 回避）
+  "perf6"    => { SRC: "perf6",
+						DEFS: "-DPERF6_HIST_NS -DHIST_MAX_TIME=4000 -DTNUM_HISTID=4" },
 
   # スピンロック機能のテストプログラム
   "spinlock1"      => { SRC: "test_spinlock1" },

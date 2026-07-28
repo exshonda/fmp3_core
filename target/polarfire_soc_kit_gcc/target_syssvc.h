@@ -69,6 +69,17 @@ extern void target_fput_log(char c);
 #include "arch/tracelog/trace_log.h"
 #endif /* TOPPERS_ENABLE_TRACE */
 
+/*
+ *  histogram の計時（perf6 等）．polarfire の広域(コア間)カウンタは CLINT mtime のみ＝
+ *  1MHz=1us 分解能．コア間 dispatch 遅延は 1us 粗さ（bin 0/1000/2000ns…, 平均は各 bin の
+ *  度数比から復元可）．他ボードと ns 表示を揃えるため us→ns 変換のみ行う（HIST_GET_TIM は
+ *  既定 fch_hrt=mtime のまま）．-DPERF6_HIST_NS 指定時のみ．
+ *  ※storm 周期は perf6 側で同一コアの fch_hrt を10万回平均するため 1us でも十分正確．
+ */
+#ifdef PERF6_HIST_NS
+#define HIST_CONV_TIM(time)		((uint_t)((uint_t)(time) * 1000U))
+#endif /* PERF6_HIST_NS */
+
 #endif /* TOPPERS_OMIT_TECS */
 
 /*

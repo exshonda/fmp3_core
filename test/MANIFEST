@@ -1,6 +1,7 @@
 PACKAGE fmp3
 
 MANIFEST
+run_hw_suite.sh
 perf0.c
 perf0.cfg
 perf0.h
