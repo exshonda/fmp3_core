@@ -35,6 +35,9 @@ test_cpuexc6.c
 test_cpuexc7.c
 test_cpuexc8.c
 test_cpuexc9.c
+test_dcre1.c
+test_dcre1.cfg
+test_dcre1.h
 test_dlynse.c
 test_dlynse.cfg
 test_dlynse.h

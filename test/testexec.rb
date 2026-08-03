@@ -87,6 +87,7 @@ TEST_SPEC = {
   "cpuexc8"  => { SRC: "test_cpuexc8", CFG: "test_cpuexc" },
   "cpuexc9"  => { SRC: "test_cpuexc9", CFG: "test_cpuexc" },
   "cpuexc10" => { SRC: "test_cpuexc10", CFG: "test_cpuexc" },
+  "dcre1"    => { SRC: "test_dcre1" },
   "dlynse"   => { SRC: "test_dlynse" },
   "dtq1"     => { SRC: "test_dtq1" },
   "exttsk"   => { SRC: "test_exttsk", CDL: "test_pf_bitkernel" },
