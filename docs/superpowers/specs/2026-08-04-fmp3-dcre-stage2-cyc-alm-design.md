@@ -65,8 +65,14 @@ typedef struct t_calm {
 ```
 
 **訂正A:** `T_NFYINFO` 型は FMP3 の include/kernel.h に**存在しない**。
-dcre `include/kernel.h:135-198` から移植する（Task 3）。ただし `TNFY_HANDLER` 等の
+dcre `include/kernel.h:135-198` から移植する。ただし `TNFY_HANDLER` 等の
 定数モード値は既存（kernel.h:447-465）。
+
+**訂正B:** cfg が `_kernel_acyc_nfyinfo_table[]` を出力する以上、型の追加は
+cfg 変更と同じタスクに入れるべき。Task 3（cfg エンジン拡張）に、「AID_CYC/AID_ALM
+の実構成を実際にコンパイル・リンクする」ステップを必須で含め、その前提として
+`T_NFYINFO` の追加も Task 3 に入れる（段階1 Task 6 で「cfg 出力の COUNT_MB_T が
+include/kernel.h に無くビルド不能」という現行バグが見逃された前例を繰り返さない）。
 
 ### 1.2 サービスコール
 
@@ -196,16 +202,27 @@ E_NOEXS（TA_NOEXS）→ E_OBJ（`cycid <= tmax_scycid`）→ 動作中なら
 **実測結論:** FMP3 の CYCID/ALMID **変換マクロが存在しない**（段階1では acre_tsk が
 無かったため不要だった）。CB テーブルは ポインタ表 (`CYCCB *const p_cyccb_table[]`、
 cyclic.h:92）であり、dcre の `(p_cyccb - cyccb_table)` インデックス方式は使えない。
-→ **段階1 TSKID と同型の inib ポインタ判定による2レンジ版マクロを新規定義する**：
+→ **段階1 TSKID と同型の inib ポインタ判定による2レンジ版マクロを新規定義する**
+（Task 5 Step 1 で実装）：
 
 ```c
-#define CYCID(p_cycinib) \
-    (((p_cycinib) >= acycinib_table && (p_cycinib) < acycinib_table + tnum_acyc) \
-        ? ((CYCID)((p_cycinib) - acycinib_table + TMIN_CYCID + tnum_scyc)) \
-        : ((CYCID)((p_cycinib) - cycinib_table + TMIN_CYCID)))
+/*
+ *  CYCCBから周期通知IDを取り出すためのマクロ
+ *
+ *  FMP3のCYCCBはポインタ表（p_cyccb_table）経由で参照される個別の
+ *  named staticであり，CYCCB自身の配列位置から番号を引けない．dcreと
+ *  異なりCYCINIBへのポインタから求める（段階1のTSKIDと同型）．動的
+ *  生成周期通知（p_cycinibがacycinib_tableを指す）と静的生成周期通知
+ *  （p_cycinibがcycinib_tableを指す）の2レンジに対応する．
+ */
+#define CYCID(p_cyccb) \
+	((((p_cyccb)->p_cycinib >= acycinib_table) \
+		&& ((p_cyccb)->p_cycinib < &acycinib_table[tnum_cyc - tnum_scyc])) \
+	  ? ((ID)(((p_cyccb)->p_cycinib - acycinib_table) + TMIN_CYCID + tnum_scyc)) \
+	  : ((ID)(((p_cyccb)->p_cycinib - cycinib_table) + TMIN_CYCID)))
 ```
 
-（段階1 kernel_impl.h の TSKID と同形式。ALMID も同型。）
+ALMID も同型（acycinib_table/tnum_cyc/tnum_scyc を aalminib_table/tnum_alm/tnum_salm へ置換）。
 
 ### 3.6 配線
 
