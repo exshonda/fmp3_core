@@ -110,6 +110,8 @@ kernelCfgC.comment_header("Task Management Functions")
 TaskObject().generate()
 
 # タスク生成順序テーブルの生成
+# TNUM_STSKID は kernel_api.def に AID_TSK が登録されているとき KernelObject.generate
+# が常に出力する（恒常出力）。AID_TSK の行を .def から外すとここが未定義参照になる。
 kernelCfgC.add("const ID _kernel_torder_table[TNUM_STSKID] = { ")
 kernelCfgC.append("\t")
 for index, (_, params) in enumerate(cfgData["CRE_TSK"].items()):

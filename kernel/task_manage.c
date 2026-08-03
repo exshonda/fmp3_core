@@ -265,6 +265,11 @@ del_tsk(ID tskid)
 	else {
 		p_tinib = (TINIB *)(p_tcb->p_tinib);
 		if ((p_tinib->tskatr & TA_MEMALLOC) != 0U) {
+			/*
+			 *  自終了直後のタスクはrelease_glock後の数命令をまだ自スタック上
+			 *  で実行している可能性があり，プールがcount==0まで解放される
+			 *  と再利用で重なる理論的な窓がある（spec 2.3の受容判断を参照）．
+			 */
 #ifdef USE_TSKINICTXB
 			free_mpk(tskinictxb_memalloc_ptr(&(p_tinib->tskinictxb)));
 #else /* USE_TSKINICTXB */

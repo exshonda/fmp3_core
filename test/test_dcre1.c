@@ -145,7 +145,7 @@ task1(EXINF exinf)
 	ctsk.stksz = STACK_SIZE;
 	ctsk.stk = user_stk;
 	erid = acre_tsk(&ctsk);
-	check_assert(erid > 0);
+	check_assert(erid > TASK1);	/* 動的タスクIDは静的レンジの外＝2レンジTSKIDの直接検証 */
 	dtskid1 = (ID) erid;
 	check_ercd(act_tsk(dtskid1), E_OK);		/* HIGH が MID を横取り → cp2 */
 	check_point(3);
@@ -163,6 +163,8 @@ task1(EXINF exinf)
 	check_ercd(del_tsk(dtskid1), E_OK);
 	ctsk.task = dtask_a;
 	ctsk.itskpri = HIGH_PRIORITY;
+	/*  この再生成タスクは以後activateしない（user_stkをdtask_bと共有しているため，
+	 *  activateすると別名スタックで壊れる）．  */
 	erid = acre_tsk(&ctsk);
 	check_assert(((ID) erid) == dtskid1);
 	check_point(4);
