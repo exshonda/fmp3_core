@@ -19,6 +19,9 @@
 /*
  *  task.c
  */
+#define free_tcb					_kernel_free_tcb
+#define tmax_stskid					_kernel_tmax_stskid
+#define atinib_table				_kernel_atinib_table
 #define initialize_task				_kernel_initialize_task
 #define search_schedtsk				_kernel_search_schedtsk
 #define update_schedtsk_dsp			_kernel_update_schedtsk_dsp

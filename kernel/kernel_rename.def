@@ -10,6 +10,9 @@ aligned_alloc_mempool
 free_mempool
 
 # task.c
+free_tcb
+tmax_stskid
+atinib_table
 initialize_task
 search_schedtsk
 update_schedtsk_dsp

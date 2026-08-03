@@ -20,6 +20,9 @@
 /*
  *  task.c
  */
+#undef free_tcb
+#undef tmax_stskid
+#undef atinib_table
 #undef initialize_task
 #undef search_schedtsk
 #undef update_schedtsk_dsp
