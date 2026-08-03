@@ -101,6 +101,15 @@ dcre の `include/kernel.h` 定義をそのまま使う（フィールド追加�
    **固定値 `iprcid = 1`・`affinity = (1 << TNUM_PRCID) - 1`** を書く。
 5. `stk == NULL` なら `malloc_mpk(stksz)`（プール未登録／枯渇なら **E_NOMEM**）、
    `tskatr |= TA_MEMALLOC`。
+5.5. **ARM-M: `USE_TSKINICTXB` 対応**
+   `arch/arm_m_gcc/common/core_kernel_impl.h:113` が `USE_TSKINICTXB` を定義し、
+   TINIB は `stksz`/`stk` でなく `TSKINICTXB { uint32_t *stk_top; uint32_t *stk_bottom; }`
+   （同:115-118）を持つ。主検証ターゲット musca_b1 がまさに ARM-M。
+   → `acre_tsk`/`del_tsk` は dcre と同じ `#ifdef USE_TSKINICTXB` 分岐を持ち、
+   ARM-M 側に `init_tskinictxb()` と `tskinictxb_memalloc_ptr()`（内部ヘルパ、Task 4）
+   を追加する。ASP3 3.7 で USE_TSKINICTXB を使う arch は posix のみ
+   （`posix_kernel_impl.h:204`）でスタック実体を持たないため、
+   **この組み合わせに上流前例は無い**。
 6. `p_tcb->p_pcb` を PRC1 の PCB に設定し `make_dormant()`。
    `TA_ACT` なら `make_active(PRC1のPCB, p_tcb)`。
 7. 返値 = `TSKID(p_tcb)`（動的レンジの ID、§4.3）。
@@ -194,8 +203,16 @@ const ID _kernel_torder_table[TNUM_STSKID] = { ... };  /* 静的分のみ（dcre
 
 - `AID_TSK` が無い場合：`TNUM_TSKID == TNUM_STSKID`、
   `TOPPERS_EMPTY_LABEL(TINIB, _kernel_atinib_table);`（dcre の
-  EMPTY_LABEL パターンを踏襲）。既存構成の生成物が**バイト単位で不変**で
-  あることを等価性検査の回帰で確認する（§6.3 negative control）。
+  EMPTY_LABEL パターンを踏襲）。**ただし本リポジトリのカーネルは
+  `ALLFUNC` で全関数コンパイルされる**（`CMakeLists.txt:560-562`）ため、
+  `initialize_task`（task.c）・`del_tsk` が参照する `_kernel_tmax_stskid`・
+  `_kernel_atinib_table`・`_kernel_mpksz`・`_kernel_mpk` は
+  **AID/DEF_MPK の有無に関わらずリンクに必要**。dcre 自身も無条件に新形式を
+  出力する（dcre DIFF:2129 以降の kernel.trb 差分は `TNUM_#{OBJ}ID` の定義や
+  inib サイズトークンを無条件に変更している）。→ **代替検査**（§6.1 参照）：
+  AID 無し構成の生成物の変更前後 diff が「Task 2 Step 7 の許容リスト」と
+  完全一致すること（それ以外の差分は不合格）。Ruby-vs-Python の等価性検査
+  （真のゲート）は全構成 exit=0 を維持する。
 - 静的タスク0個は元から cfg エラー（`kernel/task.py:104-105`）なので
   tinib_table の EMPTY_LABEL 化は起きない。
 
@@ -316,11 +333,18 @@ ISR（段階2）のみ `iprcid`/`affinity` を interrupt.h 側 inib に持つ点
 
 ### 6.1 差分等価性（主検査・F-1）
 
-- 全既存8ビルド構成で `tools/cfg_equivalence.sh` **exit=0 を維持**
-  （AID 無し構成の生成物はバイト不変であること）。
+**真のゲート**（Ruby-vs-Python バイト一致）：
+- 全既存8ビルド構成で `tools/cfg_equivalence.sh` **exit=0 を維持**。
 - 新設プリセットではなく既存構成の `.cfg` に `AID_TSK(2); DEF_MPK(...);` を
   足した派生 `.cfg` で Ruby/Python の生成物バイト一致を確認する
   （`tools/cfg_error_tests/run.sh` の流儀で、ビルド外で両エンジンを回す）。
+
+**AID 無し構成の生成物**（管理された差分による検査）：
+既存構成（`AID_TSK` なし）の生成物の変更前後 diff が「Task 2 Step 7 の
+許容リスト」**と完全一致**することで検査する（それ以外の差分は不合格）。
+本リポジトリのカーネルは `ALLFUNC` で全関数コンパイルされるため、
+動的生成機構の記号（`_kernel_tmax_stskid` 等）は AID/DEF_MPK の有無に関わらず
+リンクに必要であり、§3.3 の通り代替検査とする。
 
 ### 6.2 QEMU 回帰テスト（`test/test_dcre1` — `test_int2` の形式に倣う）
 
@@ -340,7 +364,7 @@ ISR（段階2）のみ `iprcid`/`affinity` を interrupt.h 側 inib に持つ点
 
 - **positive control**：6.2 の各エラーケースは「正しく E_XXX が返る」ことを
   値で検査（`check_ercd`）。
-- **negative control**：`AID_TSK` を書かない構成で生成物がバイト不変
+- **negative control**：`AID_TSK` を書かない構成で生成物の差分が許容リスト一致
   （§6.1）。壊れた検査対策として、テンプレートに意図的な off-by-one を
   仕込み cfg_equivalence が exit=1 になることを一度実演してから戻す
   （kria_r5 でやったのと同じ手順）。
