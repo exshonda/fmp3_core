@@ -568,6 +568,9 @@ extern bool_t	xsns_dpn(void *p_excinf) throw();
 #define COUNT_MPF_T(blksz)	TOPPERS_COUNT_SZ(blksz, sizeof(MPF_T))
 #define ROUND_MPF_T(blksz)	TOPPERS_ROUND_SZ(blksz, sizeof(MPF_T))
 
+#define COUNT_MB_T(sz)		TOPPERS_COUNT_SZ(sz, sizeof(MB_T))
+#define ROUND_MB_T(sz)		TOPPERS_ROUND_SZ(sz, sizeof(MB_T))
+
 /*
  *  その他の構成定数
  */

@@ -58,6 +58,7 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | kernel/task_term.c | mod (dcre-port) | `ras_ter`/`ter_tsk` に E_NOEXS 検査を追加。両関数とも ASP3 dcre では E_NOEXS が最初の分岐だが、FMP3 版は dcre に無い「異なるプロセッサに割り付けられているタスクならエラー」という `p_tcb->p_pcb != p_my_pcb` 分岐が既存の第1分岐として存在する。存在しないタスク（E_NOEXS）の判定を他の状態判定より優先させる方針で、E_NOEXS をその `p_pcb` 分岐より前・最初の分岐として追加した（dcre に対応物が無いため設計判断。プロセッサ違いでの呼び出しでも常に E_NOEXS が優先される） | - |
 | kernel/allfunc.h（Task 5） | mod (dcre-port) | `task_manage.c` セクション先頭（`TOPPERS_act_tsk` 直前）に `TOPPERS_acre_tsk`/`TOPPERS_del_tsk` の2行を追加（dcre allfunc.h と同一の配置）。`TOPPERS_kermem` は Task 3 で追加済みのため重複追加はしていない | - |
 | kernel/Makefile.kernel | mod (dcre-port) | `task_manage =` の .o 列挙の先頭に `acre_tsk.o del_tsk.o` を追記（上流形式の維持目的。`KERNEL_FCSRCS` は無改変。CMake の `ALLFUNC` ビルドはこの行を参照しないため実ビルドには影響しない） | - |
+| include/kernel.h（Task 6） | mod (dcre-port) | `COUNT_MPF_T`/`ROUND_MPF_T` 定義ブロック（`:568-569`）の直後に `COUNT_MB_T(sz)`/`ROUND_MB_T(sz)` の2行を追加（dcre `extension/dcre/include/kernel.h:674-675` と同一内容、`TOPPERS_COUNT_SZ`/`TOPPERS_ROUND_SZ` は既存の `:558` 付近を再利用、`MB_T` は `t_stddef.h:131` に既存）。Task 2 の DEF_MPK codegen（`kernel/kernel.py`/`kernel.trb`）はこの2マクロを `kernel_cfg.c` へ出力するが、定義側の移植が漏れており、DEF_MPK 構成を初めて実コンパイルした test_dcre1（Task 6）のビルドで未定義エラーとして発覚した。`cfg_equivalence.sh` は両エンジンの生成文字列を diff するだけでコンパイルしないため、両エンジンが同じ欠落を共有すると検出できない（検証の盲点）。dcre 同領域にある `TCNT_DTQMB`/`TCNT_PDQMB`/`TCNT_MPFMB` 等は段階3（dtq/pdq/mpf）用のため追加していない | - |
 
 種別: add=追加 / patch=部分改変 / replace=置換 / remove=削除 / none=無改変（差分ゼロだが，
 運用上の注意が必要なため記録目的で本表に載せている。現状 `cfg/` のみ）
