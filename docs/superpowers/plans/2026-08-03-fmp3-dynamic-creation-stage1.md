@@ -846,18 +846,25 @@ task1(EXINF exinf)
 	check_ercd(act_tsk(dtskid1), E_OK);		/* HIGH が MID を横取り → cp2 */
 	check_point(3);
 
-	/*  2) del → 再 acre で同一 ID（free-list LIFO）  */
-	check_ercd(del_tsk(dtskid1), E_OK);
-	erid = acre_tsk(&ctsk);
-	check_assert(((ID) erid) == dtskid1);
-	check_point(4);
-
-	/*  3) スロット枯渇 E_NOID（2個目使用後に3個目を要求）  */
+	/*  2) 2個目の生成でスロットを使い切ってから del → 再 acre で同一 ID。
+	 *  ★free-list は dcre 忠実移植で FIFO（del_tsk は queue_insert_prev で
+	 *    末尾へ・acre_tsk は queue_delete_next で先頭から）。LIFO ではない。
+	 *    空きが1個だけの状態での再 acre なら、削除したスロット＝同一 ID の
+	 *    返却が FIFO/LIFO どちらでも決定的に成立する（Task 4 レビューで
+	 *    旧シナリオの LIFO 仮定が dcre の実挙動と矛盾すると判明し修正）。  */
 	ctsk.task = dtask_b;
 	ctsk.itskpri = LOW_PRIORITY;
 	erid = acre_tsk(&ctsk);
 	check_assert(erid > 0 && ((ID) erid) != dtskid1);
 	dtskid2 = (ID) erid;
+	check_ercd(del_tsk(dtskid1), E_OK);
+	ctsk.task = dtask_a;
+	ctsk.itskpri = HIGH_PRIORITY;
+	erid = acre_tsk(&ctsk);
+	check_assert(((ID) erid) == dtskid1);
+	check_point(4);
+
+	/*  3) スロット枯渇 E_NOID（全スロット使用中に追加を要求）  */
 	erid = acre_tsk(&ctsk);
 	check_assert(erid == E_NOID);
 	check_point(5);
