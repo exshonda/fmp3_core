@@ -198,6 +198,10 @@ typedef struct task_control_block TCB;
  */
 #define TA_NOEXS		((ATR)(-1))			/* 未登録状態 */
 
+#ifndef TA_MEMALLOC
+#define TA_MEMALLOC		UINT_C(0x8000)		/* メモリ領域をカーネルで確保 */
+#endif /* TA_MEMALLOC */
+
 #ifndef TOPPERS_MACRO_ONLY
 
 /*
@@ -259,9 +263,20 @@ extern STK_T *const istkpt_table[];		/* スタックポインタの初期値 */
 #endif /* TOPPERS_ISTKPT */
 
 /*
+ *  カーネルメモリプール領域（kernel_cfg.c）
+ */
+extern const size_t	mpksz;		/* カーネルメモリプール領域のサイズ */
+extern MB_T *const	mpk;		/* カーネルメモリプール領域の先頭番地 */
+
+/*
  *  カーネル動作状態フラグ（kernel_cfg.c）
  */
 extern bool_t	kerflg_table[];
+
+/*
+ *  カーネルメモリプール領域有効フラグ（startup.c）
+ */
+extern bool_t	mpk_valid;
 
 /*
  *  カーネルの起動／終了に用いるバリア同期（startup.c）
@@ -277,6 +292,48 @@ extern void	sta_ker(void);
  *  カーネルの終了処理（startup.c）
  */
 extern void	exit_kernel(PCB *p_my_pcb);
+
+/*
+ *  メモリプール領域の管理（startup.c）
+ */
+extern bool_t initialize_mempool(MB_T *mempool, size_t size);
+extern void *malloc_mempool(MB_T *mempool, size_t size);
+extern void *aligned_alloc_mempool(MB_T *mempool,
+										size_t alignment, size_t size);
+extern void free_mempool(MB_T *mempool, void *ptr);
+
+/*
+ *  カーネルメモリプール領域からのメモリ獲得／解放
+ */
+Inline void *
+malloc_mpk(size_t size)
+{
+	if (mpk_valid) {
+		return(malloc_mempool(mpk, size));
+	}
+	else {
+		return(NULL);
+	}
+}
+
+Inline void *
+aligned_alloc_mpk(size_t alignment, size_t size)
+{
+	if (mpk_valid) {
+		return(aligned_alloc_mempool(mpk, alignment, size));
+	}
+	else {
+		return(NULL);
+	}
+}
+
+Inline void
+free_mpk(void *ptr)
+{
+	if (mpk_valid) {
+		free_mempool(mpk, ptr);
+	}
+}
 
 /*
  *  ディスパッチハンドラ（startup.c）

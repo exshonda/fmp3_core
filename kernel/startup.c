@@ -118,6 +118,11 @@ barrier_sync(uint_t phase)
 #ifdef TOPPERS_sta_ker
 
 /*
+ *  カーネルメモリプール領域有効フラグ
+ */
+bool_t	mpk_valid;
+
+/*
  *  初期化ルーチンの呼び出し
  */
 static void
@@ -174,6 +179,18 @@ sta_ker(void)
 	 *  ターゲット依存の初期化待ちのバリア同期
 	 */
 	barrier_sync(2);
+
+	/*
+	 *  カーネルメモリプール領域の初期化（マスタプロセッサのみ）
+	 */
+	if (p_my_pcb->prcid == TOPPERS_MASTER_PRCID) {
+		if (mpksz > 0U && mpk != NULL) {
+			mpk_valid = initialize_mempool(mpk, mpksz);
+		}
+		else {
+			mpk_valid = false;
+		}
+	}
 
 	/*
 	 *  各モジュールの初期化
@@ -417,3 +434,89 @@ ext_ker_handler(void)
 }
 
 #endif /* TOPPERS_extkerhdr */
+
+/*
+ *  デフォルトのメモリプール管理機能
+ *
+ *  メモリプール領域の先頭から順に割り当てを行い，すべてのメモリ領域が
+ *  解放されるまで解放されたメモリ領域を再利用しないメモリプール管理機
+ *  能．
+ */
+#ifdef TOPPERS_kermem
+#ifndef OMIT_MEMPOOL_DEFAULT
+
+typedef struct {
+	void	*brk;		/* メモリプール領域の未使用領域の先頭番地 */
+	void	*limit;		/* メモリプール領域の上限 */
+	uint_t	count;		/* 割り当てたメモリ領域の数 */
+} MEMPOOLCB;
+
+bool_t
+initialize_mempool(MB_T *mempool, size_t size)
+{
+	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
+
+	if (size >= sizeof(MEMPOOLCB)) {
+		p_mempoolcb->brk = ((char *) mempool) + sizeof(MEMPOOLCB);
+		p_mempoolcb->limit = ((char *) mempool) + size;
+		p_mempoolcb->count = 0;
+		return(true);
+	}
+	else {
+		return(false);
+	}
+}
+
+Inline void *
+align_pointer(void *ptr, size_t alignment)
+{
+	return((void *)((((uintptr_t) ptr) + alignment - 1) & ~(alignment - 1)));
+}
+
+void *
+malloc_mempool(MB_T *mempool, size_t size)
+{
+	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
+	void		*brk;
+
+	brk = align_pointer(((MEMPOOLCB *) mempool)->brk, alignof(MB_T));
+	if (((char *)(p_mempoolcb->limit)) - ((char *) brk) >= size) {
+		p_mempoolcb->brk = ((char *) brk) + size;
+		p_mempoolcb->count += 1;
+		return(brk);
+	}
+	else {
+		return(NULL);
+	}
+}
+
+void *
+aligned_alloc_mempool(MB_T *mempool, size_t alignment, size_t size)
+{
+	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
+	void		*brk;
+
+	brk = align_pointer(((MEMPOOLCB *) mempool)->brk, alignment);
+	if (((char *)(p_mempoolcb->limit)) - ((char *) brk) >= size) {
+		p_mempoolcb->brk = ((char *) brk) + size;
+		p_mempoolcb->count += 1;
+		return(brk);
+	}
+	else {
+		return(NULL);
+	}
+}
+
+void
+free_mempool(MB_T *mempool, void *ptr)
+{
+	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
+
+	p_mempoolcb->count -= 1;
+	if (p_mempoolcb->count == 0) {
+		p_mempoolcb->brk = ((char *) mempool) + sizeof(MEMPOOLCB);
+	}
+}
+
+#endif /* OMIT_MEMPOOL_DEFAULT */
+#endif /* TOPPERS_kermem */

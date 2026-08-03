@@ -11,6 +11,11 @@
 #undef exit_kernel
 #undef dispatch_handler
 #undef ext_ker_handler
+#undef mpk_valid
+#undef initialize_mempool
+#undef malloc_mempool
+#undef aligned_alloc_mempool
+#undef free_mempool
 
 /*
  *  task.c
@@ -33,7 +38,6 @@
  *  taskhook.c
  */
 #undef mtxhook_check_ceilpri
-#undef mtxhook_scan_ceilmtx
 #undef mtxhook_release_all
 
 /*
@@ -106,8 +110,6 @@
  */
 #undef initialize_mutex
 #undef mutex_check_ceilpri
-#undef mutex_scan_ceilmtx
-#undef mutex_drop_priority
 #undef mutex_acquire
 #undef mutex_release
 #undef mutex_release_all
@@ -199,6 +201,8 @@
 #undef istkpt_table
 #undef idstk_table
 #undef idstkpt_table
+#undef mpksz
+#undef mpk
 
 
 #include "target_unrename.h"

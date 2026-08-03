@@ -366,4 +366,54 @@ get_p_selftsk(void)
 
 #endif /* OMIT_GET_P_SELFTSK */
 
+/*
+ *  アラインしているかの判定
+ */
+#define ALIGNED(val, align)		((((uintptr_t)(val)) & ((align) - 1U)) == 0U)
+
+#ifdef CHECK_STKSZ_ALIGN
+#define STKSZ_ALIGN(stksz)		ALIGNED(stksz, CHECK_STKSZ_ALIGN)
+#else /* CHECK_STKSZ_ALIGN */
+#define STKSZ_ALIGN(stksz)		true
+#endif /* CHECK_STKSZ_ALIGN */
+
+#ifdef CHECK_INTPTR_ALIGN
+#define INTPTR_ALIGN(p_var)		ALIGNED(p_var, CHECK_INTPTR_ALIGN)
+#else /* CHECK_INTPTR_ALIGN */
+#define INTPTR_ALIGN(p_var)		true
+#endif /* CHECK_INTPTR_ALIGN */
+
+#ifdef CHECK_FUNC_ALIGN
+#define FUNC_ALIGN(func)		ALIGNED(func, CHECK_FUNC_ALIGN)
+#else /* CHECK_FUNC_ALIGN */
+#define FUNC_ALIGN(func)		true
+#endif /* CHECK_FUNC_ALIGN */
+
+#ifdef CHECK_STACK_ALIGN
+#define STACK_ALIGN(stack)		ALIGNED(stack, CHECK_STACK_ALIGN)
+#else /* CHECK_STACK_ALIGN */
+#define STACK_ALIGN(stack)		true
+#endif /* CHECK_STACK_ALIGN */
+
+#ifdef CHECK_MPF_ALIGN
+#define MPF_ALIGN(mpf)			ALIGNED(mpf, CHECK_MPF_ALIGN)
+#else /* CHECK_MPF_ALIGN */
+#define MPF_ALIGN(mpf)			true
+#endif /* CHECK_MPF_ALIGN */
+
+#ifdef CHECK_MB_ALIGN
+#define MB_ALIGN(mb)			ALIGNED(mb, CHECK_MB_ALIGN)
+#else /* CHECK_MB_ALIGN */
+#define MB_ALIGN(mb)			true
+#endif /* CHECK_MB_ALIGN */
+
+/*
+ *  NULLでないことの判定
+ */
+#ifdef CHECK_FUNC_NONNULL
+#define FUNC_NONNULL(func)		((func) != NULL)
+#else /* CHECK_FUNC_NONNULL */
+#define FUNC_NONNULL(func)		true
+#endif /* CHECK_FUNC_NONNULL */
+
 #endif /* TOPPERS_CHECK_H */

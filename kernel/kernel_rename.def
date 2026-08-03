@@ -3,6 +3,11 @@ barrier_sync
 exit_kernel
 dispatch_handler
 ext_ker_handler
+mpk_valid
+initialize_mempool
+malloc_mempool
+aligned_alloc_mempool
+free_mempool
 
 # task.c
 initialize_task
@@ -156,5 +161,7 @@ istk_table
 istkpt_table
 idstk_table
 idstkpt_table
+mpksz
+mpk
 
 INCLUDE "target"

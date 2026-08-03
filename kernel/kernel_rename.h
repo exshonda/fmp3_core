@@ -10,6 +10,11 @@
 #define exit_kernel					_kernel_exit_kernel
 #define dispatch_handler			_kernel_dispatch_handler
 #define ext_ker_handler				_kernel_ext_ker_handler
+#define mpk_valid					_kernel_mpk_valid
+#define initialize_mempool			_kernel_initialize_mempool
+#define malloc_mempool				_kernel_malloc_mempool
+#define aligned_alloc_mempool		_kernel_aligned_alloc_mempool
+#define free_mempool				_kernel_free_mempool
 
 /*
  *  task.c
@@ -32,7 +37,6 @@
  *  taskhook.c
  */
 #define mtxhook_check_ceilpri		_kernel_mtxhook_check_ceilpri
-#define mtxhook_scan_ceilmtx		_kernel_mtxhook_scan_ceilmtx
 #define mtxhook_release_all			_kernel_mtxhook_release_all
 
 /*
@@ -105,8 +109,6 @@
  */
 #define initialize_mutex			_kernel_initialize_mutex
 #define mutex_check_ceilpri			_kernel_mutex_check_ceilpri
-#define mutex_scan_ceilmtx			_kernel_mutex_scan_ceilmtx
-#define mutex_drop_priority			_kernel_mutex_drop_priority
 #define mutex_acquire				_kernel_mutex_acquire
 #define mutex_release				_kernel_mutex_release
 #define mutex_release_all			_kernel_mutex_release_all
@@ -198,6 +200,8 @@
 #define istkpt_table				_kernel_istkpt_table
 #define idstk_table					_kernel_idstk_table
 #define idstkpt_table				_kernel_idstkpt_table
+#define mpksz						_kernel_mpksz
+#define mpk							_kernel_mpk
 
 
 #include "target_rename.h"

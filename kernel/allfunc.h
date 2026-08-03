@@ -51,6 +51,7 @@
 #define TOPPERS_ext_ker
 #define TOPPERS_dsphdr
 #define TOPPERS_extkerhdr
+#define TOPPERS_kermem
 
 
 /* task.c */
