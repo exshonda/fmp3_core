@@ -387,10 +387,18 @@ ISR（段階2）のみ `iprcid`/`affinity` を interrupt.h 側 inib に持つ点
 
 - **段階1**（本設計の主実装）：§2〜§6 のタスク＋mpk。
   完了条件 = 6.1〜6.3 全通過。
-- **段階2**：cyc/alm/isr。cyclic/alarm は inib に `iprcid`/`affinity` 同型
-  フィールドあり、ISR は `interrupt.h:82-86` の inib 同型。段階1の
-  共通基盤（§4.5）に各1オブジェクト分の型当てはめ。E_NOEXS 検査は
-  `cyclic.c`/`alarm.c`/`interrupt.c` の参照系に追加。
+- **段階2**：cyc/alm（**ISR を除外** — 2026-08-04 訂正）。cyclic/alarm は inib に
+  `iprcid`/`affinity` 同型フィールドあり、段階1の共通基盤（§4.5）に各1オブジェクト分の
+  型当てはめ。E_NOEXS 検査は `cyclic.c`/`alarm.c` の参照系（msta_* 含む8関数）に追加。
+  詳細は `2026-08-04-fmp3-dcre-stage2-cyc-alm-design.md`。
+  **訂正（2026-08-04）**: 本項の旧記述「ISR は `interrupt.h:82-86` の inib 同型」は
+  誤り。当該行の実体は INTINIB（割込み線の管理ブロック）であり、FMP3 には
+  ランタイム ISR オブジェクト（ISRINIB/ISRCB/isr_queue）が存在しない（ISR は
+  cfg 生成時に intno ごとの平坦な呼出し列 `_kernel_inthdr_<intno>` へ消し込まれる）。
+  dcre の `acre_isr`/`del_isr` の移植は「intno ごとのランタイム優先度付きキュー +
+  ISRCB + free-list + call_isr 走査」というサブシステムの新規構築（かつ dcre が
+  持たない MP 対応の新規設計）に相当するため、段階2から外し、着手時に専用 spec を
+  書く（別計画）。
 - **段階3**（後続計画・別 spec 不要、本 spec §4.5 を根拠に計画のみ書く）：
   sem/flg/dtq/pdq/mtx/mpf。dtq/pdq/mpf は管理領域の `malloc_mpk` 確保
   （dcre DIFF:1022,2658 の型）が加わる。
