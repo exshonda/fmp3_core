@@ -30,9 +30,12 @@
 3. API 面は dcre 標準のみ：`T_CCYC`/`T_CALM` は **`T_NFYINFO` を含む dcre 定義そのまま**
    （全通知モードをサポート — A案）。独自 API なし。`acre_*` にクラス引数なし。
    `AID_CYC`/`AID_ALM` はクラス外専用（クラス内は E_RSATR）。
-4. 動的生成 cyc/alm は **`iprcid = 1`（PRC1）、`affinity = (1U << TNUM_PRCID) - 1`
-   （全プロセッサ）** をカーネルが固定で埋める。`msta_cyc`/`msta_alm` により任意の
-   （p_tevtcb を持つ）プロセッサへ移動可能。
+4. 動的生成 cyc/alm は **`iprcid = 1`（PRC1）、`affinity = TOPPERS_TEPP_PRC`
+   （全プロセッサ・target ごとに定義）** をカーネルが固定で埋める。
+   `msta_cyc`/`msta_alm` により任意の（p_tevtcb を持つ）プロセッサへ移動可能。
+   **訂正C:** affinity 式 `(1U << TNUM_PRCID) - 1` から `TOPPERS_TEPP_PRC` へ変更。
+   根拠: cyclic.py:65-68 の静的側検査が TOPPERS_TEPP_PRC を正式値として見ており、
+   両者の一貫性を厳密化。実測で全8プリセット PRC1 が p_tevtcb を持つ構成を確認済み。
 5. 検証 = F-1：Ruby `.trb` にも同時移植し `tools/cfg_equivalence.sh`
    （exit 0=一致/1=不一致/2=前提未充足であり合格ではない）を主検査に維持。
 6. CB はヒープ確保しない。予約 CB（named static + ポインタ表末尾）+ RAM inib 配列。
@@ -61,8 +64,9 @@ typedef struct t_calm {
 } T_CALM;
 ```
 
-`T_NFYINFO` は FMP3 の include/kernel.h に既存（静的 API 用に定義済み）である
-ことを実装前に確認する。無ければ dcre 定義を移植する。
+**訂正A:** `T_NFYINFO` 型は FMP3 の include/kernel.h に**存在しない**。
+dcre `include/kernel.h:135-198` から移植する（Task 3）。ただし `TNFY_HANDLER` 等の
+定数モード値は既存（kernel.h:447-465）。
 
 ### 1.2 サービスコール
 
@@ -73,9 +77,10 @@ extern ER_ID	acre_alm(const T_CALM *pk_calm) throw();
 extern ER		del_alm(ID almid) throw();
 ```
 
-機能コード `TFN_ACRE_CYC`/`TFN_DEL_CYC`/`TFN_ACRE_ALM`/`TFN_DEL_ALM` が
-`include/kernel_fncode.h` に既存かを実装前に確認（段階1では TFN_ACRE_TSK/-193 が
-既存だった。無ければ dcre の値で追加し台帳記録）。
+機能コード確認（実測）: `TFN_ACRE_CYC`/`TFN_DEL_CYC`/`TFN_ACRE_ALM`/`TFN_DEL_ALM` が
+`include/kernel_fncode.h` に既存。値は `kernel_fncode.h:142-155` により
+`TFN_ACRE_CYC (-202)`/`TFN_ACRE_ALM (-203)`/`TFN_DEL_CYC (-218)`/`TFN_DEL_ALM (-219)`。
+→ `include/kernel_fncode.h` は変更**不要**。
 
 ### 1.3 エラーコード（dcre 準拠）
 
@@ -108,6 +113,11 @@ RAM `_kernel_acycinib_table[]`（または `TOPPERS_EMPTY_LABEL`）・予約
 クラス外専用検査（E_RSATR）も共通枠組みが担う（段階1で DEF_MPK に施したのと
 同じ規約が AID_* には既に入っている — 実装前に cyclic/alarm で発火することを確認）。
 
+**訂正E:** ただし、ガード条件が静的個数のみ（`len(cfgData[self.api])`）であるため、
+**「AID登録済みで静的オブジェクト0個」の穴が存在**（ユーザが `AID_CYC(n)` だけ書いて
+`DEF_CYC` 無しの場合）。Task 3 で「AID>0 かつ静的0個は cfg エラー」を追加検査として
+挿入する。
+
 ### 2.3 cyclic.trb/.py・alarm.trb/.py の個別変更
 
 - 静的 inib 出力のサイズトークンを `TNUM_CYCID` → `TNUM_SCYCID`（alm 同様）へ。
@@ -139,6 +149,13 @@ CYCCB/ALMCB には専用のキュー領域が無いため、dcre cyclic.c:118-12
 FMP3 の CYCCB/ALMCB にも tmevtb はあり（cyclic.h:75、alarm.h:70）、QUEUE より
 大きいことを実装前に static assert 相当（コンパイル時 or 目視）で確認する。
 
+**訂正D:** 実測にて確認：64-bit 環境で `sizeof(QUEUE)=16, offsetof(TMEVTB.callback)=8`。
+QUEUE の p_prev（@offset 8）と TMEVTB の callback（@offset 8）が重なるため、
+free-list 転用後に **callback/arg フィールドが上書きされる**リスクあり。
+対処: `acre_cyc`/`acre_alm` で QUEUE 転用後に callback/arg を毎回明示的に再設定する。
+（既存の s*cyc/s*alm が `initialize_cyclic`/`initialize_alarm` で初回設定時に
+同様に設定するのと同じ方式。）
+
 ### 3.2 initialize_cyclic / initialize_alarm
 
 - 静的ループの境界を `tnum_cyc` → `tnum_scyc`（alm 同様）。既存の
@@ -160,7 +177,7 @@ dcre cyclic.c:171-233 / alarm.c:160-207 を FMP3 のロック規約
   （dcre と同一式）。
 - ロック内: free-list 空なら E_NOID。空きスロットを pop し、inib へ
   cycatr/exinf/nfyhdr/cyctim/cycphs を充填。**Constraint 4**: `iprcid = 1`、
-  `affinity = (1U << TNUM_PRCID) - 1`。`p_cyccb->p_pcb = get_pcb(1)`、
+  `affinity = TOPPERS_TEPP_PRC`。`p_cyccb->p_pcb = get_pcb(1)`、
   `cycsta = false`。
 - 通知: `nfymode == TNFY_HANDLER` なら exinf/nfyhdr を直接格納。それ以外は
   `acyc_nfyinfo_table[スロット番号]` に `T_NFYINFO` をコピーし、
@@ -176,12 +193,19 @@ E_NOEXS（TA_NOEXS）→ E_OBJ（`cycid <= tmax_scycid`）→ 動作中なら
 
 ### 3.5 ID マクロの2レンジ化
 
-段階1の TSKID と同じ問題が CYCID/ALMID にもある。FMP3 の CYCID/ALMID マクロの
-現行実装（inib ベースか CB ポインタ表ベースか）を実装前に確認し、
-**inib ベースなら段階1 TSKID と同型の2レンジ版**へ置換する
-（`p_cycinib` が `acycinib_table` 範囲内なら動的 ID 式、でなければ静的 ID 式）。
-CB ポインタ表の線形位置から引く実装なら変更不要の可能性がある — 現物で判断し、
-判断根拠を計画に記録する。
+**実測結論:** FMP3 の CYCID/ALMID **変換マクロが存在しない**（段階1では acre_tsk が
+無かったため不要だった）。CB テーブルは ポインタ表 (`CYCCB *const p_cyccb_table[]`、
+cyclic.h:92）であり、dcre の `(p_cyccb - cyccb_table)` インデックス方式は使えない。
+→ **段階1 TSKID と同型の inib ポインタ判定による2レンジ版マクロを新規定義する**：
+
+```c
+#define CYCID(p_cycinib) \
+    (((p_cycinib) >= acycinib_table && (p_cycinib) < acycinib_table + tnum_acyc) \
+        ? ((CYCID)((p_cycinib) - acycinib_table + TMIN_CYCID + tnum_scyc)) \
+        : ((CYCID)((p_cycinib) - cycinib_table + TMIN_CYCID)))
+```
+
+（段階1 kernel_impl.h の TSKID と同形式。ALMID も同型。）
 
 ### 3.6 配線
 
@@ -229,12 +253,15 @@ sta_cyc/sta_alm と同位置への類推適用であることを計画・レビ�
 
 **del_* vs 実行中ハンドラ**: `call_cyclic`/`call_alarm`（FMP3 版）はハンドラ
 呼出しの前後で giant lock を解放/再取得する。ハンドラ実行中（glock 解放窓）に
-別コアが del_* を完了し得るが、call_* はハンドラ復帰後に **glock を取り直してから**
-CB を再参照するため、TA_NOEXS 化・tmevtb の free-list 転用と衝突しない
-（call_* 側の再参照が「削除済み」をどう扱うかは dcre の call_cyclic の再判定
-ロジックを FMP3 現物と突き合わせ、必要な分岐だけ dcre から補う —
-実装前確認項目）。段階1 spec §2.3 の「自終了タスクのスタック残余ウィンドウ」の
-ような未防御窓が cyc/alm に存在するか否かを、計画の中で明示的に結論づける。
+別コアが del_* を完了し得るが、**call_* はハンドラ復帰後に CB フィールドを
+再参照しない**（cyclic.c:315-350、alarm.c:299-329 実測：LOG_* マクロはデフォルト
+空であり、復帰後は glock 再取得とロック再判定のみ）。TA_NOEXS 化・tmevtb の
+free-list 転用と衝突しない。
+
+残る唯一の窓は、**ハンドラ呼出し式そのもの** の `p_cycinib->nfyhdr` 読取り中に
+別コアが del → acre で新ハンドラが指す可能性（inib ポインタの stale 化）。
+これは **段階1 spec §2.3 の「自終了タスクのスタック残余ウィンドウ」と同型の
+受容済み窓** — ユーザが del 直後に acre する競合を自ら書いた場合のみ到達する。
 
 **del_* vs 発火済み tmevtb**: 動作中の削除は tmevtb_dequeue で timer キューから
 外してから free-list 転用するため、タイマ側から見た dangling は生じない
@@ -243,9 +270,11 @@ CB を再参照するため、TA_NOEXS 化・tmevtb の free-list 転用と衝�
 
 **前提条件の現物確認**: `initialize_cyclic`/`initialize_alarm` は
 `p_my_pcb->p_tevtcb == NULL` のプロセッサでは何もしない構造がある
-（cyclic.c:121-123）。**PRC1（マスタ）が p_tevtcb を持たない構成が
-5ターゲット・8プリセットに存在しないこと**を実装前に確認する。存在する場合、
-Constraint 4（iprcid=1 固定）が成立しないため設計を差し戻す。
+（cyclic.c:121-123）。**実測で全8プリセット（musca_b1/musca_b1-2core/
+rp2350_pico2/polarfire_soc_kit-qemu/kria_arm64/kria_arm64-1core/kria_r5/kria_r5-2core）の
+PRC1 が p_tevtcb を持つことを確認済み**（`p_tevtcb_table[0]` が NULL でない）、
+かつすべて `TOPPERS_TEPP_PRC` の bit 0 が立っている（PRC1 が TEP プロセッサ）。
+→ Constraint 4（iprcid=1 固定）が成立し、設計有効。
 
 ---
 
@@ -308,3 +337,68 @@ Constraint 4（iprcid=1 固定）が成立しないため設計を差し戻す�
    削除済み CB への耐性（§5.2）
 8. AID_* のクラス外専用検査が cyclic/alarm オブジェクトでも共通枠組みで
    発火すること（§2.2）
+
+---
+
+## 10. 実装前確認の結果（2026-08-04 実測）
+
+### 検証結果表
+
+| # | 項目 | 検査内容 | 結果 | 判定 |
+|---|---|---|---|---|
+| 1 | T_NFYINFO 有無 | include/kernel.h に型が存在するか | **0件**（未実装） | 訂正A: dcre から移植 |
+| 2 | 機能コード | TFN_ACRE_* 等 4つの既存有無 | **4件とも既存** (kernel_fncode.h:142-155) | 変更不要 |
+| 2a | (参考) TFN_ACRE_CYC | — | `-202` | Task 3 参照値 |
+| 2b | (参考) TFN_ACRE_ALM | — | `-203` | Task 3 参照値 |
+| 2c | (参考) TFN_DEL_CYC | — | `-218` | Task 3 参照値 |
+| 2d | (参考) TFN_DEL_ALM | — | `-219` | Task 3 参照値 |
+| 3 | CYCID/ALMID マクロ | ポインタ表か inib 表か | **ポインタ表** (cyclic.h:92) | 2レンジ版を新規定義 |
+| 4 | free-list 転用の成立条件 | sizeof(QUEUE)= ? , offsetof(callback)= ? | 64-bit: `16, 8` → callback上書きリスク | 訂正D: acre_* で再設定 |
+| 5 | 全8プリセット PRC1 検査 | musca_b1, musca_b1-2core, ... | **全8プリセット p_tevtcb != NULL** | ✅ 設計有効 |
+| 5a | (参考) musca_b1 TEPP_PRC | — | `0x1` (bit 0 set) | PRC1 は TEP |
+| 5b | (参考) musca_b1-2core TEPP_PRC | — | `0x3` (bit 0 set) | PRC1 は TEP |
+| 5c | (参考) rp2350_pico2 TEPP_PRC | — | `0x1` (bit 0 set) | PRC1 は TEP |
+| 5d | (参考) polarfire_soc_kit-qemu TEPP_PRC | — | `0xf` (bit 0 set) | PRC1 は TEP |
+| 5e | (参考) kria_arm64 TEPP_PRC | — | `0xf` (bit 0 set) | PRC1 は TEP |
+| 5f | (参考) kria_arm64-1core TEPP_PRC | — | `0x1` (bit 0 set) | PRC1 は TEP |
+| 5g | (参考) kria_r5 TEPP_PRC | — | `0x1` (bit 0 set) | PRC1 は TEP |
+| 5h | (参考) kria_r5-2core TEPP_PRC | — | `0x3` (bit 0 set) | PRC1 は TEP |
+| 6 | check_nfyinfo/notify_handler 所在 | 関数がどこにあるか | dcre `time_manage.c:225,309` | Task 4 で転写 |
+| 6a | (参考) check_nfyinfo 区画名 | — | `TOPPERS_chknfy` | Task 4 参照 |
+| 6b | (参考) notify_handler 区画名 | — | `TOPPERS_nfyhdr` | Task 4 参照 |
+| 6c | INTPTR_NONNULL | check.h に存在するか | **0件**（未実装） | Task 4 で追加 |
+| 7 | call_cyclic/call_alarm 再参照 | ハンドラ復帰後に CB フィールドを参照するか | **しない** (cyclic.c:315-350, alarm.c:299-329) | 安全・§5.2 確定 |
+| 8 | AID_* 共通枠組み | クラス外検査が自動で走るか | **走る** (has_aid ガード) | ただし穴あり |
+| 8a | (参考) 穴の内容 | 静的0個・AID登録済みをチェックするか | **チェックしない** | 訂正E: Task 3 で追加 |
+
+### 最終判定
+
+✅ **8/8 確認完了** → **設計有効**
+
+特に Step 5（全8プリセット PRC1 に p_tevtcb）が CRITICAL 条件であり、
+すべての構成で要件を満たすことを確認。Constraint 4 成立。
+
+### 訂正5件の反映
+
+| 訂正 | 対象 | 変更内容 | 実施済み |
+|---|---|---|---|
+| A | §1.1 | T_NFYINFO 移植の明示 | ✅ |
+| C | Global Constraints 4、§3.3 | affinity を TOPPERS_TEPP_PRC に | ✅ |
+| D | §3.1 | 64-bit callback 上書き対策 | ✅ |
+| E | §2.2 | 静的0個穴の記録と Task 3 追加検査指示 | ✅ |
+| (§3.5) | §3.5 | CYCID/ALMID 2レンジ版新定義確定 | ✅ |
+
+### 後続 Task への引き渡し
+
+#### Task 3 (cfg エンジン)
+- 訂正E: 静的0個・AID登録は cfg エラー追加検査
+- 機能コード確定値: TFN_ACRE_CYC(-202), TFN_ACRE_ALM(-203), TFN_DEL_CYC(-218), TFN_DEL_ALM(-219)
+
+#### Task 4 (カーネル実装)
+- 訂正D: acre_* で callback/arg 再設定
+- check_nfyinfo/notify_handler: dcre time_manage.c:225,309 から転写
+- INTPTR_NONNULL: dcre check.h:130-134 から追加
+
+#### Task 5 (CYCID/ALMID)
+- 2レンジ版マクロ新定義（CB テーブルがポインタ表のため）
+- inib ポインタ判定方式（段階1 TSKID と同型）
