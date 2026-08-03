@@ -16,3 +16,5 @@ DEF_EXC .excno* { .excatr &exchdr }
 DEF_ICS { .istksz &istk? }
 ATT_INI { .iniatr &exinf &inirtn }
 ATT_TER { .teratr &exinf &terrtn }
+AID_TSK .notsk
+DEF_MPK { .mpksz &mpk? }

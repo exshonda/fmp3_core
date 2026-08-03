@@ -110,7 +110,7 @@ kernelCfgC.comment_header("Task Management Functions")
 TaskObject().generate()
 
 # タスク生成順序テーブルの生成
-kernelCfgC.add("const ID _kernel_torder_table[TNUM_TSKID] = { ")
+kernelCfgC.add("const ID _kernel_torder_table[TNUM_STSKID] = { ")
 kernelCfgC.append("\t")
 for index, (_, params) in enumerate(cfgData["CRE_TSK"].items()):
     if index > 0:

@@ -33,6 +33,11 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | arch/arm_gcc/common/*.py（3個: core_check.py/core_kernel.py/core_offset.py） | add | arm_gcc（Cortex-R5F/GIC）コア共通層の Python テンプレート。前例なし・全数新規移植。計画C Task 8 | - |
 | arch/arm_gcc/zynqmp_r5/{chip.cmake,chip_kernel.py} | add | kria_r5 chip 層（ZynqMP RPU/Cortex-R5F）。`chip_kernel.py` はプライベート割込み（intno 0〜31）のみプロセッサ番号で符号化する（`(prcid << 16) | intno`）構造（グローバル割込み32〜186はintno自体は符号化しない）。前例なし・全数新規。計画C Task 8/10 | - |
 | target/kria_r5_gcc/*.py（3個: target_check.py/target_class.py/target_kernel.py） | add | kria_r5 ターゲット層。前例なし・全数新規。計画C Task 10 | - |
+| kernel/kernel_api.def | mod (dcre-port) | 動的生成（dcre 段階1）静的API `AID_TSK .notsk` / `DEF_MPK { .mpksz &mpk? }` の2行を追加。dcre extension（`extension/dcre/kernel/kernel_api.def`）と同一の記法。cfg 両エンジン共用のためこの1ファイルの改変で足りる | - |
+| kernel/kernel.trb | mod (dcre-port) | `KernelObject`（`@aidapi`/`@noobj`/`@inibList` の汎化と `generate()` の AID 集計・`TNUM_S*ID`/`_kernel_tmax_s*id`/動的 inib ブロック/予約 CB・ポインタ表末尾の追加）と末尾の `DEF_MPK` → `mpksz`/`mpk` 出力ブロックを追加。dcre kernel.trb（asp3_core 1.7.1 拡張）の DIFF を FMP3（プロセッサ/クラス概念あり）向けに翻案。段階1では `kernel_api.def` に `AID_TSK` のみ登録済みのため、`@aidapi` が `$cfgData` に無いオブジェクト（tsk 以外）は新規追加ブロックを完全にスキップし既存出力を厳密保持（Task 2 Step 7 の管理された差分許容リストがタスク+mpk 関連の5項目のみである根拠） | - |
+| kernel/task.trb | mod (dcre-port) | `_kernel_torder_table` のサイズトークンを `TNUM_TSKID`（総数）から `TNUM_STSKID`（静的数）へ変更（dcre task.trb と同じ変更点） | - |
+| kernel/kernel_check.trb | mod (dcre-port) | パス3（メモリ検査）に `DEF_MPK` の mpk 整列・非NULL検査ブロックを追加（dcre kernel_check.trb 相当） | - |
+| kernel/kernel_sym.def | mod (dcre-port) | パス3が参照する `CHECK_MPK_ALIGN`/`CHECK_MPK_NONNULL`/`CHECK_MB_ALIGN` の3シンボルを追加（dcre kernel_sym.def と同一の3行） | - |
 
 種別: add=追加 / patch=部分改変 / replace=置換 / remove=削除 / none=無改変（差分ゼロだが，
 運用上の注意が必要なため記録目的で本表に載せている。現状 `cfg/` のみ）
