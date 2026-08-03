@@ -775,10 +775,12 @@ else:
     if len(cfgData["DEF_MPK"]) > 1:
         error("E_OBJ: too many DEF_MPK")
     params0 = cfgData["DEF_MPK"][1]
+    if "class" in params0:
+        error_ercd("E_RSATR", params0, "DEF_MPK must not be within a class")
     params0.setdefault("mpk", "NULL")
     if params0["mpksz"] == 0:
         error_wrong("E_PAR", params0, "mpksz", "zero")
-    if str(params0["mpk"]) == "NULL":
+    if params0["mpk"] == "NULL":
         kernelCfgC.add("static MB_T _kernel_memory_pool"
                        f"[COUNT_MB_T({params0['mpksz']})];")
         mpksz = f"ROUND_MB_T({params0['mpksz']})"

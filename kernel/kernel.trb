@@ -834,6 +834,11 @@ else
 
   params0 = $cfgData[:DEF_MPK][1]
 
+  # クラスの囲みの中に記述されている場合（E_RSATR。クラス外専用API）
+  if params0.has_key?(:class)
+    error_ercd("E_RSATR", params0, "DEF_MPK must not be within a class")
+  end
+
   # パラメータが省略された時のデフォルト値の設定
   params0[:mpk] ||= "NULL"
 
