@@ -140,12 +140,20 @@
  */
 #undef initialize_cyclic
 #undef call_cyclic
+#undef free_cyccb
+#undef tmax_scycid
+#undef acycinib_table
+#undef acyc_nfyinfo_table
 
 /*
  *  alarm.c
  */
 #undef initialize_alarm
 #undef call_alarm
+#undef free_almcb
+#undef tmax_salmid
+#undef aalminib_table
+#undef aalm_nfyinfo_table
 
 /*
  *  interrupt.c

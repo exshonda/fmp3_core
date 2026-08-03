@@ -97,11 +97,6 @@
 #endif /* LOG_REF_CYC_LEAVE */
 
 /*
- *  周期通知の数
- */
-#define tnum_cyc	((uint_t)(tmax_cycid - TMIN_CYCID + 1))
-
-/*
  *  周期通知IDから周期通知管理ブロックを取り出すためのマクロ
  */
 #define INDEX_CYC(cycid)	((uint_t)((cycid) - TMIN_CYCID))
@@ -112,17 +107,28 @@
  */
 #ifdef TOPPERS_cycini
 
+/*
+ *  使用していない周期通知管理ブロックのリスト
+ *
+ *  CYCCBの先頭にはキューにつなぐための領域がないため，タイムイベント
+ *  ブロック（tmevtb）の領域を用いる．なお64ビット環境ではQUEUEが
+ *  tmevtb.callbackまで覆うため，free-listから取り出した側（acre_cyc）
+ *  でcallback/argを再設定する必要がある．
+ */
+QUEUE	free_cyccb;
+
 void
 initialize_cyclic(PCB *p_my_pcb)
 {
-	uint_t	i;
+	uint_t	i, j;
 	CYCCB	*p_cyccb;
+	CYCINIB	*p_cycinib;
 
 	if (p_my_pcb->p_tevtcb == NULL){
 		return;
 	}
 
-	for (i = 0; i < tnum_cyc; i++) {
+	for (i = 0; i < tnum_scyc; i++) {
 		if(cycinib_table[i].iprcid == p_my_pcb->prcid) {
 			p_cyccb = p_cyccb_table[i];
 			p_cyccb->p_cycinib = &(cycinib_table[i]);
@@ -141,6 +147,29 @@ initialize_cyclic(PCB *p_my_pcb)
 			else {
 				p_cyccb->cycsta = false;
 			}
+		}
+	}
+
+	/*
+	 *  動的生成用スロットの初期化（マスタプロセッサのみ）
+	 *
+	 *  動的生成された周期通知はiprcid=TOPPERS_MASTER_PRCID固定で生成
+	 *  されるため，スロットの初期化もマスタプロセッサが一括して行う．
+	 *  他プロセッサへの可視性は，本関数の呼出し後のbarrier_syncが保証
+	 *  する（段階1のfree_tcbと同じ論証）．
+	 */
+	if (p_my_pcb->prcid == TOPPERS_MASTER_PRCID) {
+		queue_initialize(&free_cyccb);
+		for (i = tnum_scyc, j = 0; i < tnum_cyc; i++, j++) {
+			p_cyccb = p_cyccb_table[i];
+			p_cycinib = &(acycinib_table[j]);
+			p_cycinib->cycatr = TA_NOEXS;
+			p_cyccb->p_cycinib = ((const CYCINIB *) p_cycinib);
+			p_cyccb->cycsta = false;
+			p_cyccb->p_pcb = p_my_pcb;
+			p_cyccb->tmevtb.callback = (CBACK) call_cyclic;
+			p_cyccb->tmevtb.arg = (void *) p_cyccb;
+			queue_insert_prev(&free_cyccb, ((QUEUE *) &(p_cyccb->tmevtb)));
 		}
 	}
 }

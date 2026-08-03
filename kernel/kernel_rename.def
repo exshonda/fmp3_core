@@ -106,10 +106,18 @@ notify_handler
 # cyclic.c
 initialize_cyclic
 call_cyclic
+free_cyccb
+tmax_scycid
+acycinib_table
+acyc_nfyinfo_table
 
 # alarm.c
 initialize_alarm
 call_alarm
+free_almcb
+tmax_salmid
+aalminib_table
+aalm_nfyinfo_table
 
 # interrupt.c
 initialize_interrupt

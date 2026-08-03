@@ -139,12 +139,20 @@
  */
 #define initialize_cyclic			_kernel_initialize_cyclic
 #define call_cyclic					_kernel_call_cyclic
+#define free_cyccb					_kernel_free_cyccb
+#define tmax_scycid					_kernel_tmax_scycid
+#define acycinib_table				_kernel_acycinib_table
+#define acyc_nfyinfo_table			_kernel_acyc_nfyinfo_table
 
 /*
  *  alarm.c
  */
 #define initialize_alarm			_kernel_initialize_alarm
 #define call_alarm					_kernel_call_alarm
+#define free_almcb					_kernel_free_almcb
+#define tmax_salmid					_kernel_tmax_salmid
+#define aalminib_table				_kernel_aalminib_table
+#define aalm_nfyinfo_table			_kernel_aalm_nfyinfo_table
 
 /*
  *  interrupt.c

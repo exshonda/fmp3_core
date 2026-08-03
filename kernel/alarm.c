@@ -97,11 +97,6 @@
 #endif /* LOG_REF_ALM_LEAVE */
 
 /*
- *  アラーム通知の数
- */
-#define tnum_alm	((uint_t)(tmax_almid - TMIN_ALMID + 1))
-
-/*
  *  アラーム通知IDからアラーム通知管理ブロックを取り出すためのマクロ
  */
 #define INDEX_ALM(almid)	((uint_t)((almid) - TMIN_ALMID))
@@ -112,17 +107,28 @@
  */
 #ifdef TOPPERS_almini
 
+/*
+ *  使用していないアラーム通知管理ブロックのリスト
+ *
+ *  ALMCBの先頭にはキューにつなぐための領域がないため，タイムイベント
+ *  ブロック（tmevtb）の領域を用いる．なお64ビット環境ではQUEUEが
+ *  tmevtb.callbackまで覆うため，free-listから取り出した側（acre_alm）
+ *  でcallback/argを再設定する必要がある．
+ */
+QUEUE	free_almcb;
+
 void
 initialize_alarm(PCB *p_my_pcb)
 {
-	uint_t	i;
+	uint_t	i, j;
 	ALMCB	*p_almcb;
+	ALMINIB	*p_alminib;
 
 	if (p_my_pcb->p_tevtcb == NULL) {
 		return;
 	}
 
-	for (i = 0; i < tnum_alm; i++) {
+	for (i = 0; i < tnum_salm; i++) {
 		if (alminib_table[i].iprcid == p_my_pcb->prcid) {
 			p_almcb = p_almcb_table[i];
 			p_almcb->p_alminib = &(alminib_table[i]);
@@ -132,8 +138,30 @@ initialize_alarm(PCB *p_my_pcb)
 			p_almcb->tmevtb.arg = (void *) p_almcb;
 		}
 	}
-}
 
+	/*
+	 *  動的生成用スロットの初期化（マスタプロセッサのみ）
+	 *
+	 *  動的生成されたアラーム通知はiprcid=TOPPERS_MASTER_PRCID固定で
+	 *  生成されるため，スロットの初期化もマスタプロセッサが一括して
+	 *  行う．他プロセッサへの可視性は，本関数の呼出し後のbarrier_sync
+	 *  が保証する（段階1のfree_tcbと同じ論証）．
+	 */
+	if (p_my_pcb->prcid == TOPPERS_MASTER_PRCID) {
+		queue_initialize(&free_almcb);
+		for (i = tnum_salm, j = 0; i < tnum_alm; i++, j++) {
+			p_almcb = p_almcb_table[i];
+			p_alminib = &(aalminib_table[j]);
+			p_alminib->almatr = TA_NOEXS;
+			p_almcb->p_alminib = ((const ALMINIB *) p_alminib);
+			p_almcb->almsta = false;
+			p_almcb->p_pcb = p_my_pcb;
+			p_almcb->tmevtb.callback = (CBACK) call_alarm;
+			p_almcb->tmevtb.arg = (void *) p_almcb;
+			queue_insert_prev(&free_almcb, ((QUEUE *) &(p_almcb->tmevtb)));
+		}
+	}
+}
 
 #endif /* TOPPERS_almini */
 
