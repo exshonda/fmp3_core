@@ -129,6 +129,12 @@
 #define force_unlock_spin			_kernel_force_unlock_spin
 
 /*
+ *  time_manage.c
+ */
+#define check_nfyinfo				_kernel_check_nfyinfo
+#define notify_handler				_kernel_notify_handler
+
+/*
  *  cyclic.c
  */
 #define initialize_cyclic			_kernel_initialize_cyclic

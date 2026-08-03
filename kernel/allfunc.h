@@ -214,6 +214,8 @@
 #define TOPPERS_get_tim
 #define TOPPERS_adj_tim
 #define TOPPERS_fch_hrt
+#define TOPPERS_chknfy
+#define TOPPERS_nfyhdr
 
 /* cyclic.c */
 #define TOPPERS_cycini

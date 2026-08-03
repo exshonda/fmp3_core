@@ -358,5 +358,19 @@ extern void ext_ker_handler(void);
  */
 typedef void	(*NFYHDR)(EXINF exinf);
 
+/*
+ *  通知方法のエラーチェック（time_manage.c）
+ */
+extern ER		check_nfyinfo(const T_NFYINFO *p_nfyinfo);
+
+/*
+ *  通知ハンドラ（time_manage.c）
+ *
+ *  exinfとして渡されたT_NFYINFOに従い，変数設定・タスク起動等の通知
+ *  処理を行うトランポリン．動的生成されたcyc/almのうち通知方法が
+ *  TNFY_HANDLER以外のものは，nfyhdrとしてこの関数を登録する．
+ */
+extern void		notify_handler(EXINF exinf);
+
 #endif /* TOPPERS_MACRO_ONLY */
 #endif /* TOPPERS_KERNEL_IMPL_H */

@@ -99,6 +99,10 @@ get_mpf_block
 initialize_spin_lock
 force_unlock_spin
 
+# time_manage.c
+check_nfyinfo
+notify_handler
+
 # cyclic.c
 initialize_cyclic
 call_cyclic

@@ -426,4 +426,10 @@ get_p_selftsk(void)
 #define FUNC_NONNULL(func)		true
 #endif /* CHECK_FUNC_NONNULL */
 
+#ifdef CHECK_INTPTR_NONNULL
+#define INTPTR_NONNULL(p_var)	((p_var) != NULL)
+#else /* CHECK_INTPTR_NONNULL */
+#define INTPTR_NONNULL(p_var)	true
+#endif /* CHECK_INTPTR_NONNULL */
+
 #endif /* TOPPERS_CHECK_H */

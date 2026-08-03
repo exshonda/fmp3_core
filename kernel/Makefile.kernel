@@ -103,7 +103,7 @@ mutex = mtxini.o mtxchk.o mtxacq.o mtxrel.o mtxrela.o \
 mempfix = mpfini.o mpfget.o get_mpf.o pget_mpf.o tget_mpf.o \
 		rel_mpf.o ini_mpf.o ref_mpf.o
 
-time_manage = set_tim.o get_tim.o adj_tim.o fch_hrt.o
+time_manage = set_tim.o get_tim.o adj_tim.o fch_hrt.o chknfy.o nfyhdr.o
 
 cyclic = cycini.o sta_cyc.o msta_cyc.o stp_cyc.o ref_cyc.o cyccal.o
 

@@ -130,6 +130,12 @@
 #undef force_unlock_spin
 
 /*
+ *  time_manage.c
+ */
+#undef check_nfyinfo
+#undef notify_handler
+
+/*
  *  cyclic.c
  */
 #undef initialize_cyclic
