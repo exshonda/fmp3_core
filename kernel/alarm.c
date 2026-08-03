@@ -166,6 +166,146 @@ initialize_alarm(PCB *p_my_pcb)
 #endif /* TOPPERS_almini */
 
 /*
+ *  アラーム通知の生成
+ */
+#ifdef TOPPERS_acre_alm
+
+#ifndef LOG_ACRE_ALM_ENTER
+#define LOG_ACRE_ALM_ENTER(pk_calm)
+#endif /* LOG_ACRE_ALM_ENTER */
+
+#ifndef LOG_ACRE_ALM_LEAVE
+#define LOG_ACRE_ALM_LEAVE(ercd)
+#endif /* LOG_ACRE_ALM_LEAVE */
+
+ER_ID
+acre_alm(const T_CALM *pk_calm)
+{
+	ALMCB		*p_almcb;
+	ALMINIB		*p_alminib;
+	ATR			almatr;
+	T_NFYINFO	*p_nfyinfo;
+	ER			ercd;
+
+	LOG_ACRE_ALM_ENTER(pk_calm);
+	CHECK_TSKCTX_UNL();
+
+	almatr = pk_calm->almatr;
+
+	CHECK_VALIDATR(almatr, TA_NULL);
+	ercd = check_nfyinfo(&(pk_calm->nfyinfo));
+	if (ercd != E_OK) {
+		goto error_exit;
+	}
+
+	lock_cpu();
+	acquire_glock();
+	if (tnum_alm == tnum_salm || queue_empty(&free_almcb)) {
+		ercd = E_NOID;
+	}
+	else {
+		p_almcb = ((ALMCB *)(((char *) queue_delete_next(&free_almcb))
+											- offsetof(ALMCB, tmevtb)));
+		p_alminib = (ALMINIB *)(p_almcb->p_alminib);
+		p_alminib->almatr = almatr;
+		if (pk_calm->nfyinfo.nfymode == TNFY_HANDLER) {
+			p_alminib->exinf = pk_calm->nfyinfo.nfy.handler.exinf;
+			p_alminib->nfyhdr = (NFYHDR)(pk_calm->nfyinfo.nfy.handler.tmehdr);
+		}
+		else {
+			p_nfyinfo = &aalm_nfyinfo_table[p_alminib - aalminib_table];
+			*p_nfyinfo = pk_calm->nfyinfo;
+			p_alminib->exinf = (EXINF) p_nfyinfo;
+			p_alminib->nfyhdr = notify_handler;
+		}
+		/*
+		 *  動的生成アラーム通知の割付けプロセッサ（Global Constraint 4）．
+		 *  affinityはTOPPERS_TEPP_PRC（時間イベント処理プロセッサ集合）．
+		 */
+		p_alminib->iprcid = TOPPERS_MASTER_PRCID;
+		p_alminib->affinity = ((uint_t) TOPPERS_TEPP_PRC);
+
+		/*
+		 *  free-listのリンクにtmevtb領域を転用しているため，64ビット
+		 *  環境ではcallbackが上書きされている．必ず再設定する．
+		 */
+		p_almcb->p_pcb = get_pcb(TOPPERS_MASTER_PRCID);
+		p_almcb->tmevtb.callback = (CBACK) call_alarm;
+		p_almcb->tmevtb.arg = (void *) p_almcb;
+
+		p_almcb->almsta = false;
+		ercd = ALMID(p_almcb);
+	}
+	release_glock();
+	unlock_cpu();
+
+  error_exit:
+	LOG_ACRE_ALM_LEAVE(ercd);
+	return(ercd);
+}
+
+#endif /* TOPPERS_acre_alm */
+
+/*
+ *  アラーム通知の削除
+ */
+#ifdef TOPPERS_del_alm
+
+#ifndef LOG_DEL_ALM_ENTER
+#define LOG_DEL_ALM_ENTER(almid)
+#endif /* LOG_DEL_ALM_ENTER */
+
+#ifndef LOG_DEL_ALM_LEAVE
+#define LOG_DEL_ALM_LEAVE(ercd)
+#endif /* LOG_DEL_ALM_LEAVE */
+
+ER
+del_alm(ID almid)
+{
+	ALMCB	*p_almcb;
+	ALMINIB	*p_alminib;
+	ER		ercd;
+
+	LOG_DEL_ALM_ENTER(almid);
+	CHECK_TSKCTX_UNL();
+	CHECK_ID(VALID_ALMID(almid));
+	p_almcb = get_almcb(almid);
+
+	lock_cpu();
+	acquire_glock();
+	if (p_almcb->p_alminib->almatr == TA_NOEXS) {
+		ercd = E_NOEXS;
+	}
+	else if (almid <= tmax_salmid) {
+		ercd = E_OBJ;
+	}
+	else {
+		/*
+		 *  動作中でも削除できる［dcre仕様］．動作中ならタイムイベント
+		 *  キューから外してからfree-listへ返却する．dequeueの対象は
+		 *  当該アラーム通知の割付けプロセッサ（stp_almと同じ手順）．
+		 */
+		if (p_almcb->almsta) {
+			p_almcb->almsta = false;
+			tmevtb_dequeue(&(p_almcb->tmevtb), p_almcb->p_pcb);
+		}
+
+		p_alminib = (ALMINIB *)(p_almcb->p_alminib);
+		p_alminib->almatr = TA_NOEXS;
+		queue_insert_prev(&free_almcb, ((QUEUE *) &(p_almcb->tmevtb)));
+		ercd = E_OK;
+	}
+	release_glock();
+	unlock_cpu();
+
+  error_exit:
+	LOG_DEL_ALM_LEAVE(ercd);
+	return(ercd);
+}
+
+#endif /* TOPPERS_del_alm */
+
+/*
  *  アラーム通知の動作開始
  */
 #ifdef TOPPERS_sta_alm
@@ -184,14 +324,19 @@ sta_alm(ID almid, RELTIM almtim)
 
 	lock_cpu();
 	acquire_glock();
-	if (p_almcb->almsta) {
-		tmevtb_dequeue(&(p_almcb->tmevtb), p_almcb->p_pcb);
+	if (p_almcb->p_alminib->almatr == TA_NOEXS) {
+		ercd = E_NOEXS;
 	}
 	else {
-		p_almcb->almsta = true;
+		if (p_almcb->almsta) {
+			tmevtb_dequeue(&(p_almcb->tmevtb), p_almcb->p_pcb);
+		}
+		else {
+			p_almcb->almsta = true;
+		}
+		tmevtb_enqueue_reltim(&(p_almcb->tmevtb), almtim, p_almcb->p_pcb);
+		ercd = E_OK;
 	}
-	tmevtb_enqueue_reltim(&(p_almcb->tmevtb), almtim, p_almcb->p_pcb);
-	ercd = E_OK;
 	release_glock();
 	unlock_cpu();
 
@@ -228,16 +373,21 @@ msta_alm(ID almid, RELTIM almtim, ID prcid)
 
 	lock_cpu();
 	acquire_glock();
-	if (p_almcb->almsta) {
-		tmevtb_dequeue(&(p_almcb->tmevtb), p_almcb->p_pcb);
+	if (p_almcb->p_alminib->almatr == TA_NOEXS) {
+		ercd = E_NOEXS;
 	}
 	else {
-		p_almcb->almsta = true;
+		if (p_almcb->almsta) {
+			tmevtb_dequeue(&(p_almcb->tmevtb), p_almcb->p_pcb);
+		}
+		else {
+			p_almcb->almsta = true;
+		}
+		LOG_ALMMIG(p_almcb, p_almcb->p_pcb->prcid, prcid);
+		p_almcb->p_pcb = get_pcb(prcid);
+		tmevtb_enqueue_reltim(&(p_almcb->tmevtb), almtim, p_almcb->p_pcb);
+		ercd = E_OK;
 	}
-	LOG_ALMMIG(p_almcb, p_almcb->p_pcb->prcid, prcid);
-	p_almcb->p_pcb = get_pcb(prcid);
-	tmevtb_enqueue_reltim(&(p_almcb->tmevtb), almtim, p_almcb->p_pcb);
-	ercd = E_OK;
 	release_glock();
 	unlock_cpu();
 
@@ -266,11 +416,16 @@ stp_alm(ID almid)
 
 	lock_cpu();
 	acquire_glock();
-	if (p_almcb->almsta) {
-		p_almcb->almsta = false;
-		tmevtb_dequeue(&(p_almcb->tmevtb), p_almcb->p_pcb);
+	if (p_almcb->p_alminib->almatr == TA_NOEXS) {
+		ercd = E_NOEXS;
 	}
-	ercd = E_OK;
+	else {
+		if (p_almcb->almsta) {
+			p_almcb->almsta = false;
+			tmevtb_dequeue(&(p_almcb->tmevtb), p_almcb->p_pcb);
+		}
+		ercd = E_OK;
+	}
 	release_glock();
 	unlock_cpu();
 
@@ -299,15 +454,20 @@ ref_alm(ID almid, T_RALM *pk_ralm)
 
 	lock_cpu();
 	acquire_glock();
-	if (p_almcb->almsta) {
-		pk_ralm->almstat = TALM_STA;
-		pk_ralm->lefttim = tmevt_lefttim(&(p_almcb->tmevtb));
+	if (p_almcb->p_alminib->almatr == TA_NOEXS) {
+		ercd = E_NOEXS;
 	}
 	else {
-		pk_ralm->almstat = TALM_STP;
+		if (p_almcb->almsta) {
+			pk_ralm->almstat = TALM_STA;
+			pk_ralm->lefttim = tmevt_lefttim(&(p_almcb->tmevtb));
+		}
+		else {
+			pk_ralm->almstat = TALM_STP;
+		}
+		pk_ralm->prcid = p_almcb->p_pcb->prcid;
+		ercd = E_OK;
 	}
-	pk_ralm->prcid = p_almcb->p_pcb->prcid;
-	ercd = E_OK;
 	release_glock();
 	unlock_cpu();
 

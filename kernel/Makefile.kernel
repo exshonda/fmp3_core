@@ -105,9 +105,9 @@ mempfix = mpfini.o mpfget.o get_mpf.o pget_mpf.o tget_mpf.o \
 
 time_manage = set_tim.o get_tim.o adj_tim.o fch_hrt.o chknfy.o nfyhdr.o
 
-cyclic = cycini.o sta_cyc.o msta_cyc.o stp_cyc.o ref_cyc.o cyccal.o
+cyclic = cycini.o acre_cyc.o del_cyc.o sta_cyc.o msta_cyc.o stp_cyc.o ref_cyc.o cyccal.o
 
-alarm = almini.o sta_alm.o msta_alm.o stp_alm.o ref_alm.o almcal.o
+alarm = almini.o acre_alm.o del_alm.o sta_alm.o msta_alm.o stp_alm.o ref_alm.o almcal.o
 
 spin_lock = spnini.o funlspn.o loc_spn.o unl_spn.o try_spn.o ref_spn.o
 

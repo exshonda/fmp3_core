@@ -219,6 +219,8 @@
 
 /* cyclic.c */
 #define TOPPERS_cycini
+#define TOPPERS_acre_cyc
+#define TOPPERS_del_cyc
 #define TOPPERS_sta_cyc
 #define TOPPERS_msta_cyc
 #define TOPPERS_stp_cyc
@@ -227,6 +229,8 @@
 
 /* alarm.c */
 #define TOPPERS_almini
+#define TOPPERS_acre_alm
+#define TOPPERS_del_alm
 #define TOPPERS_sta_alm
 #define TOPPERS_msta_alm
 #define TOPPERS_stp_alm

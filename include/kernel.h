@@ -261,11 +261,23 @@ typedef struct t_rmpf {
 						   付けることができる固定長メモリブロックの数 */
 } T_RMPF;
 
+typedef struct t_ccyc {
+	ATR			cycatr;		/* 周期通知属性 */
+	T_NFYINFO	nfyinfo;	/* 周期通知の通知方法 */
+	RELTIM		cyctim;		/* 周期通知の通知周期 */
+	RELTIM		cycphs;		/* 周期通知の通知位相 */
+} T_CCYC;
+
 typedef struct t_rcyc {
 	STAT	cycstat;	/* 周期通知の動作状態 */
 	RELTIM	lefttim;	/* 次回通知時刻までの相対時間 */
 	ID		prcid;		/* 割付けプロセッサのID */
 } T_RCYC;
+
+typedef struct t_calm {
+	ATR			almatr;		/* アラーム通知属性 */
+	T_NFYINFO	nfyinfo;	/* アラーム通知の通知方法 */
+} T_CALM;
 
 typedef struct t_ralm {
 	STAT	almstat;	/* アラーム通知の動作状態 */
@@ -391,11 +403,15 @@ extern ER		get_tim(SYSTIM *p_systim) throw();
 extern ER		adj_tim(int32_t adjtim) throw();
 extern HRTCNT	fch_hrt(void) throw();
 
+extern ER_ID	acre_cyc(const T_CCYC *pk_ccyc) throw();
+extern ER		del_cyc(ID cycid) throw();
 extern ER		sta_cyc(ID cycid) throw();
 extern ER		msta_cyc(ID cycid, ID prcid) throw();
 extern ER		stp_cyc(ID cycid) throw();
 extern ER		ref_cyc(ID cycid, T_RCYC *pk_rcyc) throw();
 
+extern ER_ID	acre_alm(const T_CALM *pk_calm) throw();
+extern ER		del_alm(ID almid) throw();
 extern ER		sta_alm(ID almid, RELTIM almtim) throw();
 extern ER		msta_alm(ID almid, RELTIM almtim, ID prcid) throw();
 extern ER		stp_alm(ID almid) throw();
