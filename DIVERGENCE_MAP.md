@@ -64,6 +64,9 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | test/test_dcre1.h | add (dcre-port) | 上記テストのヘッダ（優先度定数・`MPK_SIZE`・関数プロトタイプ）。`test_int2.h` と同型 | - |
 | test/MANIFEST | mod (dcre-port) | `test_cpuexc9.c` の後・`test_dlynse.c` の前（アルファベット順）に `test_dcre1.c`/`test_dcre1.cfg`/`test_dcre1.h` の3行を追加 | - |
 | test/testexec.rb | mod (dcre-port) | `"cpuexc10"` の後・`"dlynse"` の前に `"dcre1" => { SRC: "test_dcre1" },` を追加 | - |
+| arch/arm_m_gcc/common/core_rename.def | mod (upstream-gap-fix) | ファイル先頭の `# core_kernel_impl.c` 節の直前に `# core_kernel_impl.h` 節を新設し `sense_lock`/`unlock_cpu` の2エントリを追加。cfg 生成コードが参照する `_kernel_sense_lock`/`_kernel_unlock_cpu` が未リネームで多重ISR構成がリンク不能（arm64 の `core_rename.def` には同節が存在するが arm_m には節ごと欠落していた、pristine 由来の既存ギャップ）。`_kernel_lock_cpu` の未定義参照は出なかったため `lock_cpu` は追加していない（最小差分） | 報告候補（段階1最終レビュー 上流報告候補 b） |
+| arch/arm_m_gcc/common/core_rename.h | mod (upstream-gap-fix) | 上記 `.def` の変更を `utils/genrename.rb core`（`arch/arm_m_gcc/common` で実行）により再生成（手編集ではない）。`#define sense_lock _kernel_sense_lock` / `#define unlock_cpu _kernel_unlock_cpu` の2行が core_kernel_impl.c 節の直前に追加された。**副作用として** `svc_handler` の1行がタブ+スペース混在からタブのみへ整形された（同一シンボル・同一リネーム先で意味的な差分ではない。今回の2エントリ追加とは無関係に、変更前の `.def` からの再生成でも同じ整形差分が再現することを確認済み＝pristine 側の生成物が現行 `genrename.rb` の出力と既に乖離していた既存ドリフト。手編集で温存する選択肢は Constraint 2（生成物は手編集禁止）に反するため、regeneration の結果をそのまま採用した） | 報告候補（段階1最終レビュー 上流報告候補 b） |
+| arch/arm_m_gcc/common/core_unrename.h | mod (upstream-gap-fix) | 上記と同時に再生成。`#undef sense_lock` / `#undef unlock_cpu` の2行を追加。他の差分なし | 報告候補（段階1最終レビュー 上流報告候補 b） |
 
 種別: add=追加 / patch=部分改変 / replace=置換 / remove=削除 / none=無改変（差分ゼロだが，
 運用上の注意が必要なため記録目的で本表に載せている。現状 `cfg/` のみ）
