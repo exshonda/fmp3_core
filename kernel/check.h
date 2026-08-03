@@ -277,6 +277,16 @@ check_dispatch_mystate(TCB **pp_selftsk)
 } while (false)
 
 /*
+ *  属性が無効なビットが立っていないかのチェック（E_RSATR）
+ */
+#define CHECK_VALIDATR(atr, valid_atr) do {					\
+	if (((atr) & ~(valid_atr)) != 0U) {						\
+		ercd = E_RSATR;										\
+		goto error_exit;									\
+	}														\
+} while (false)
+
+/*
  *  パラメータエラーのチェック（E_PAR）
  */
 #define CHECK_PAR(exp) do {									\

@@ -133,6 +133,15 @@ typedef	TOPPERS_MPF_T	MPF_T;	/* 固定長メモリプール領域を確保する
 /*
  *  パケット形式の定義
  */
+typedef struct t_ctsk {
+	ATR		tskatr;		/* タスク属性 */
+	EXINF	exinf;		/* タスクの拡張情報 */
+	TASK	task;		/* タスクのメインルーチンの先頭番地 */
+	PRI		itskpri;	/* タスクの起動時優先度 */
+	size_t	stksz;		/* タスクのスタック領域のサイズ */
+	STK_T	*stk;		/* タスクのスタック領域の先頭番地 */
+} T_CTSK;
+
 typedef struct t_rtsk {
 	STAT	tskstat;	/* タスク状態 */
 	PRI		tskpri;		/* タスクの現在優先度 */
@@ -209,6 +218,8 @@ typedef struct t_rspn {
 /*
  *  タスク管理機能
  */
+extern ER_ID	acre_tsk(const T_CTSK *pk_ctsk) throw();
+extern ER		del_tsk(ID tskid) throw();
 extern ER		act_tsk(ID tskid) throw();
 extern ER		mact_tsk(ID tskid, ID prcid) throw();
 extern ER_UINT	can_act(ID tskid) throw();

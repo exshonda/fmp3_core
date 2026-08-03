@@ -98,6 +98,8 @@
 #define TOPPERS_sigtim
 
 /* task_manage.c */
+#define TOPPERS_acre_tsk
+#define TOPPERS_del_tsk
 #define TOPPERS_act_tsk
 #define TOPPERS_mact_tsk
 #define TOPPERS_can_act
