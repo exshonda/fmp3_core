@@ -140,6 +140,17 @@ class KernelObject:
                 numAutoObjid += int(params[self.noobj])
         numObjid = len(cfgData[self.api]) + numAutoObjid
 
+        # AID_xxx が 1 個以上あるのに静的オブジェクトが 0 個の構成は、
+        # データ構造生成ガード（下記 len(cfgData[self.api]) > 0）により
+        # CB 実体もアクセステーブルも初期化関数登録も生成されないまま
+        # TNUM_xxxID だけが増える（free-list 未初期化のまま acre される）。
+        # 段階2 ではこれを cfg エラーとして弾く（dcre も同じ穴を持つ）。
+        if numAutoObjid > 0 and len(cfgData[self.api]) == 0:
+            for _, params in cfgData[self.aidapi].items():
+                error_ercd("E_OBJ", params,
+                           f"{self.aidapi} requires at least one "
+                           f"{self.api} in the system")
+
         # オブジェクトの数のマクロ定義の生成（kernel_cfg.h）
         kernelCfgH.add(f"#define TNUM_{self.OBJ}ID\t"
                        f"{numObjid}")

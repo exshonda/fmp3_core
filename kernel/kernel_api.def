@@ -18,3 +18,5 @@ ATT_INI { .iniatr &exinf &inirtn }
 ATT_TER { .teratr &exinf &terrtn }
 AID_TSK .notsk
 DEF_MPK { .mpksz &mpk? }
+AID_CYC .nocyc
+AID_ALM .noalm

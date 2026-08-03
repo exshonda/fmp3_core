@@ -47,6 +47,7 @@
 class AlarmObject(KernelObject):
     def __init__(self):
         super().__init__("alm", "alarm")
+        self.inibList["T_NFYINFO"] = "aalm_nfyinfo_table"
 
     def prepare(self, key, params):
         # almatrが無効の場合（E_RSATR）

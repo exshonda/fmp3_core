@@ -131,6 +131,72 @@ typedef	TOPPERS_STK_T	STK_T;	/* スタック領域を確保するための型 */
 typedef	TOPPERS_MPF_T	MPF_T;	/* 固定長メモリプール領域を確保するための型 */
 
 /*
+ *  タイムイベントの通知方法のパケット形式の定義
+ */
+typedef struct {
+	EXINF		exinf;		/* タイムイベントハンドラの拡張情報 */
+	TMEHDR		tmehdr;		/* タイムイベントハンドラの先頭番地 */
+} T_NFY_HDR;
+
+typedef struct {
+	intptr_t	*p_var;		/* 変数の番地 */
+	intptr_t	value;		/* 設定する値 */
+} T_NFY_VAR;
+
+typedef struct {
+	intptr_t	*p_var;		/* 変数の番地 */
+} T_NFY_IVAR;
+
+typedef struct {
+	ID			tskid;		/* タスクID */
+} T_NFY_TSK;
+
+typedef struct {
+	ID			semid;		/* セマフォID */
+} T_NFY_SEM;
+
+typedef struct {
+	ID			flgid;		/* イベントフラグID */
+	FLGPTN		flgptn;		/* セットするビットパターン */
+} T_NFY_FLG;
+
+typedef struct {
+	ID			dtqid;		/* データキューID */
+	intptr_t	data;		/* 送信する値 */
+} T_NFY_DTQ;
+
+typedef struct {
+	intptr_t	*p_var;		/* 変数の番地 */
+} T_ENFY_VAR;
+
+typedef struct {
+	ID			dtqid;		/* データキューID */
+} T_ENFY_DTQ;
+
+typedef struct {
+	MODE	nfymode;			/* 通知処理モード */
+	union {						/* タイムイベントの通知に関する付随情報 */
+		T_NFY_HDR	handler;
+		T_NFY_VAR	setvar;
+		T_NFY_IVAR	incvar;
+		T_NFY_TSK	acttsk;
+		T_NFY_TSK	wuptsk;
+		T_NFY_SEM	sigsem;
+		T_NFY_FLG	setflg;
+		T_NFY_DTQ	snddtq;
+	} nfy;
+	union {						/* エラーの通知に関する付随情報 */
+		T_ENFY_VAR	setvar;
+		T_NFY_IVAR	incvar;
+		T_NFY_TSK	acttsk;
+		T_NFY_TSK	wuptsk;
+		T_NFY_SEM	sigsem;
+		T_NFY_FLG	setflg;
+		T_ENFY_DTQ	snddtq;
+	} enfy;
+} T_NFYINFO;
+
+/*
  *  パケット形式の定義
  */
 typedef struct t_ctsk {

@@ -147,6 +147,17 @@ class KernelObject
     end
     numObjid = $cfgData[@api].size + numAutoObjid
 
+    # AID_xxxが1個以上あるのに静的オブジェクトが0個の構成は，データ構造
+    # 生成ガード（下記$cfgData[@api].size > 0）によりCB実体もアクセス
+    # テーブルも初期化関数登録も生成されないままTNUM_xxxIDだけが増える
+    # （free-list未初期化のままacreされる）．段階2ではcfgエラーで弾く．
+    if numAutoObjid > 0 && $cfgData[@api].size == 0
+      $cfgData[@aidapi].each do |_, params|
+        error_ercd("E_OBJ", params,
+                   "#{@aidapi} requires at least one #{@api} in the system")
+      end
+    end
+
     # オブジェクトの数のマクロ定義の生成（kernel_cfg.h）
     # ［NGKI1022］［NGKI1451］［NGKI1557］［NGKI1664］［NGKI1799］
     # ［NGKI2020］［NGKI3298］［NGKI2127］［NGKI2220］［NGKI2378］

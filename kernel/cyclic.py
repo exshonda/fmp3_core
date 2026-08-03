@@ -47,6 +47,7 @@
 class CyclicObject(KernelObject):
     def __init__(self):
         super().__init__("cyc", "cyclic")
+        self.inibList["T_NFYINFO"] = "acyc_nfyinfo_table"
 
     def prepare(self, key, params):
         # cycatrが無効の場合（E_RSATR）
