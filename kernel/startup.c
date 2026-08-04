@@ -438,18 +438,78 @@ ext_ker_handler(void)
 /*
  *  デフォルトのメモリプール管理機能
  *
- *  メモリプール領域の先頭から順に割り当てを行い，すべてのメモリ領域が
- *  解放されるまで解放されたメモリ領域を再利用しないメモリプール管理機
- *  能．
+ *  基本はメモリプール領域の先頭から順に割り当てるバンプ方式だが，解放
+ *  されたメモリ領域を単方向リスト（freelist）に記録しておき，要求サイ
+ *  ズが解放時の要求サイズと完全に一致し，かつ番地が要求アラインメント
+ *  に適合する場合に限ってそれを再利用するメモリプール管理機能．サイズ
+ *  が一致しない要求は従来どおりバンプで割り当てる（ブロックの分割・結
+ *  合は行わない）．すべてのメモリ領域が解放されたとき（count == 0）は，
+ *  従来どおり未使用領域の先頭番地をプール先頭へ戻し，freelist も空に
+ *  する（backstop）．
+ *
+ *  ★dcreからの意図的な逸脱（機能拡張）：dcre の原形（extension/dcre/
+ *  kernel/startup.c）は「すべてのメモリ領域が解放されるまで解放された
+ *  メモリ領域を再利用しない」単純バンプであり，長寿命の割付けが1つで
+ *  も生存している限り create/delete の反復でプールが単調に痩せて
+ *  E_NOMEM に到達する．本実装は完全一致サイズの再利用でこの病理を除去
+ *  する（DIVERGENCE_MAP.md 参照）．
  */
 #ifdef TOPPERS_kermem
 #ifndef OMIT_MEMPOOL_DEFAULT
+
+/*
+ *  割付けヘッダ
+ *
+ *  各割付けのユーザ領域の直前に置き，割付け時の要求サイズ（無加工）を
+ *  記録する．解放後も上書きされずに残り，freelist 走査時のサイズ完全
+ *  一致判定に使う．
+ *
+ *  レイアウト： [padding][MPHDR][ユーザ領域 size バイト]
+ *
+ *  ユーザ領域側を要求アラインメントに合わせ，ヘッダはその直前
+ *  （ユーザ領域先頭 - sizeof(MPHDR)）に置く．ヘッダ自身のアラインメン
+ *  トは，alignment が2の巾乗（呼出し側の責任）かつ alignof(size_t) 以
+ *  上であることに依存して成立する（alloc_mempool 冒頭の assert と
+ *  下の mphdr_size_check を参照）．
+ */
+typedef struct {
+	size_t	size;		/* 割付け時の要求サイズ（無加工） */
+} MPHDR;
+
+/*
+ *  解放済みブロック
+ *
+ *  解放されたユーザ領域の先頭を転用して格納する（単方向 LIFO）．
+ *
+ *  ユーザ領域が sizeof(FREEBLK)（ポインタ1個）より小さい割付け（現行
+ *  カーネルでは 64bit ターゲットの sizeof(MPFMB) * 1 == 4B が該当）で
+ *  は，この書込みがユーザ領域の末尾を越える．ただし越える範囲は
+ *  [user + size, user + sizeof(FREEBLK)) であり，次の割付けのヘッダは
+ *  最速でも user + size + sizeof(MPHDR) から始まる．
+ *  sizeof(FREEBLK) == sizeof(void *) == sizeof(size_t) == sizeof(MPHDR)
+ *  なので，はみ出しは必ず「自ユーザ領域末尾〜次ヘッダ直前の死領域（誰
+ *  も読み書きしないパディング）」に収まり，他の生きたデータを壊さない．
+ *  size == 0 の割付けは非対応（現行の全呼出し側は CHECK_PAR とあふれ
+ *  検査により size > 0 を保証している．将来呼出し側を追加する場合は
+ *  この不変を維持すること）．
+ */
+typedef struct free_block {
+	struct free_block	*next;	/* 次の解放済みブロック */
+} FREEBLK;
 
 typedef struct {
 	void	*brk;		/* メモリプール領域の未使用領域の先頭番地 */
 	void	*limit;		/* メモリプール領域の上限 */
 	uint_t	count;		/* 割り当てたメモリ領域の数 */
+	FREEBLK	*freelist;	/* 解放済みブロックのリストの先頭 */
 } MEMPOOLCB;
+
+/*
+ *  sizeof(MPHDR) == sizeof(size_t) のコンパイル時検査（ヘッダ直前配置
+ *  のアラインメント成立性と FREEBLK 書込みの安全性論証の前提）．
+ *  成立しない構成ではこの typedef が負サイズ配列になりコンパイルエラー．
+ */
+typedef char	mphdr_size_check[(sizeof(MPHDR) == sizeof(size_t)) ? 1 : -1];
 
 bool_t
 initialize_mempool(MB_T *mempool, size_t size)
@@ -460,6 +520,7 @@ initialize_mempool(MB_T *mempool, size_t size)
 		p_mempoolcb->brk = ((char *) mempool) + sizeof(MEMPOOLCB);
 		p_mempoolcb->limit = ((char *) mempool) + size;
 		p_mempoolcb->count = 0;
+		p_mempoolcb->freelist = NULL;
 		return(true);
 	}
 	else {
@@ -489,11 +550,16 @@ initialize_mempool(MB_T *mempool, size_t size)
  *
  *  そこで本実装は，すべての算術を符号なし（uintptr_t）で行い，
  *
+ *      ・ヘッダ分（sizeof(MPHDR)）の前進の加算があふれないこと
  *      ・調整の加算があふれないこと
  *      ・調整後のbrkがlimitを越えていないこと
  *
  *  をこの順に確かめてから初めて残量（limit - aligned）を計算する．負の差が
  *  生じうる箇所が式の上に存在しないため，(1)の誤判定は構造的に起こらない．
+ *  ★freelist化（機能拡張）で加算が1つ増えた（brk + sizeof(MPHDR)）ため，
+ *  そのあふれ検査を既存のガード列と同じ流儀（加算の前に検査）で追加して
+ *  いる．size側にヘッダを加算する式は存在しない（ヘッダはbrk側に折り込ま
+ *  れ，sizeは残量比較にのみ使う）．
  *
  *  ★この修正だけでは穴は塞がらない．呼出し側（acre_dtq/acre_pdq/acre_mpf/
  *  acre_tsk）が渡すsize自体が乗算・丸めであふれていると，「小さくなったsize」
@@ -501,7 +567,9 @@ initialize_mempool(MB_T *mempool, size_t size)
  *  一体で修正している（各acre_*のCHECK_PARを参照）．
  *
  *  alignmentは2の巾乗であること（呼出し側の責任．alignof(MB_T)ないし
- *  aligned_alloc_mpkの引数）．
+ *  aligned_alloc_mpkの引数）．加えてヘッダ直前配置のアラインメント成立性
+ *  のため alignment >= alignof(size_t) であること（現行の全呼出し側で成立
+ *  することをコード読解で確認済み．冒頭のassertはこの前提の防御である）．
  */
 Inline void *
 alloc_mempool(MEMPOOLCB *p_mempoolcb, size_t alignment, size_t size)
@@ -510,6 +578,39 @@ alloc_mempool(MEMPOOLCB *p_mempoolcb, size_t alignment, size_t size)
 	uintptr_t	limit = ((uintptr_t)(p_mempoolcb->limit));
 	uintptr_t	adjust = (((uintptr_t) alignment) - 1U);
 	uintptr_t	aligned;
+	FREEBLK		**pp_freeblk;
+	FREEBLK		*p_freeblk;
+	MPHDR		*p_mphdr;
+
+	assert(alignment >= sizeof(size_t)
+			&& (alignment & (alignment - 1U)) == 0U);
+
+	/*
+	 *  解放済みリストの走査（完全一致再利用）
+	 *
+	 *  割付け時の要求サイズが今回の要求サイズと完全に一致し，かつ番地
+	 *  が要求アラインメントに適合する最初のブロックを unlink して返す．
+	 *  ヘッダ（MPHDR.size）は割付け時のまま残っているので書換え不要．
+	 */
+	for (pp_freeblk = &(p_mempoolcb->freelist); (*pp_freeblk) != NULL;
+					pp_freeblk = &((*pp_freeblk)->next)) {
+		p_freeblk = *pp_freeblk;
+		p_mphdr = ((MPHDR *)(((char *) p_freeblk) - sizeof(MPHDR)));
+		if (p_mphdr->size == size
+				&& (((uintptr_t) p_freeblk) & adjust) == 0U) {
+			*pp_freeblk = p_freeblk->next;
+			p_mempoolcb->count += 1;
+			return((void *) p_freeblk);
+		}
+	}
+
+	/*
+	 *  ヘッダ分の前進の加算があふれる場合は割り当てられない．
+	 */
+	if (brk > ((~((uintptr_t) 0U)) - ((uintptr_t) sizeof(MPHDR)))) {
+		return(NULL);
+	}
+	brk += ((uintptr_t) sizeof(MPHDR));
 
 	/*
 	 *  アラインメント調整の加算があふれる場合は割り当てられない．
@@ -530,9 +631,18 @@ alloc_mempool(MEMPOOLCB *p_mempoolcb, size_t alignment, size_t size)
 		return(NULL);
 	}
 
+	/*
+	 *  ヘッダをユーザ領域の直前に書き，要求サイズを記録する．
+	 *  aligned は alignment の倍数，alignment は alignof(size_t) 以上
+	 *  の2の巾乗（冒頭の assert），sizeof(MPHDR) == sizeof(size_t)
+	 *  （mphdr_size_check）なので，aligned - sizeof(MPHDR) も
+	 *  alignof(size_t) の倍数であり，この書込みは常にアラインする．
+	 */
+	p_mphdr = ((MPHDR *)(aligned - ((uintptr_t) sizeof(MPHDR))));
+	p_mphdr->size = size;
 	p_mempoolcb->brk = ((void *)(aligned + ((uintptr_t) size)));
 	p_mempoolcb->count += 1;
-	return(((void *) aligned));
+	return((void *) aligned);
 }
 
 void *
@@ -551,10 +661,18 @@ void
 free_mempool(MB_T *mempool, void *ptr)
 {
 	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
+	FREEBLK		*p_freeblk = ((FREEBLK *) ptr);
 
+	p_freeblk->next = p_mempoolcb->freelist;
+	p_mempoolcb->freelist = p_freeblk;
 	p_mempoolcb->count -= 1;
 	if (p_mempoolcb->count == 0) {
+		/*
+		 *  backstop：全解放されたら brk を先頭へ戻し，freelist も空に
+		 *  する（直前に push した1件も含めて消える）．
+		 */
 		p_mempoolcb->brk = ((char *) mempool) + sizeof(MEMPOOLCB);
+		p_mempoolcb->freelist = NULL;
 	}
 }
 

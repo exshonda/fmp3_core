@@ -504,20 +504,25 @@ task1(EXINF exinf)
 	 *  「①は入るが①+②は入らない」サイジングで②を失敗させる．
 	 *
 	 *  【算術】カーネルメモリプールの実効容量は
-	 *    MPK_SIZE(2048) - sizeof(MEMPOOLCB)(12) = 2036 バイト
-	 *  である（32bit ターゲット）．ROUND_MPF_T(4) == sizeof(MPF_T) == 4，
+	 *    MPK_SIZE(2048) - sizeof(MEMPOOLCB)(16) = 2032 バイト
+	 *  である（32bit ターゲット・freelist 実装）．各割付けには 4B の
+	 *  ヘッダ（MPHDR）が付く．ROUND_MPF_T(4) == sizeof(MPF_T) == 4，
 	 *  sizeof(MPFMB) == 4 なので，
 	 *
-	 *    ケースA: blkcnt=400 → ① 4*400=1600 ≤ 2036（成功）
-	 *                          ② 4*400=1600 > 2036-1600=436（失敗）→ E_NOMEM
-	 *    ケースB: blkcnt=200 → ① 4*200=800 ＋ ② 4*200=800 = 1600 ≤ 2036（成功）
+	 *    ケースA: blkcnt=400 → ① 4+4*400=1604 ≤ 2032（成功）
+	 *                          ② 4+4*400=1604 > 2032-1604=428（失敗）→ E_NOMEM
+	 *    ケースB: blkcnt=200 → ① 4+4*200=804 ＋ ② 4+4*200=804
+	 *                          = 1608 ≤ 2032（成功）
 	 *
 	 *  【なぜケースBが巻き戻しの証拠になるか】
-	 *  kernel/startup.c のプールは bump allocator で，free_mempool は count が
-	 *  0 になったときにだけ brk を先頭へ戻す．ケースAで①が巻き戻されれば
-	 *  count は 0 に戻り brk がリセットされるので，直後のケースB（1600B）は
-	 *  入る．巻き戻しが無ければ count は 1 のまま，残量は 436B しかなく，
-	 *  ケースBは①（800B）の時点で E_NOMEM になる．
+	 *  kernel/startup.c の free_mempool は，count が 0 になったときに
+	 *  brk を先頭へ戻し freelist を空にする（backstop）．この検査の直前
+	 *  で count は 0・freelist は空なので，ケースA/B の割付けはすべて
+	 *  bump 経路を通る（freelist の完全一致再利用はここでは効かない）．
+	 *  ケースAで①が巻き戻されれば count は 1→0 に戻り backstop が効く
+	 *  ので，直後のケースB（計1608B）は入る．巻き戻しが無ければ count
+	 *  は 1 のまま，残量は 428B しかなく，ケースBは①（804B）の時点で
+	 *  E_NOMEM になる．
 	 *  ★したがって「ケースBが成功すること」が①の解放の直接の観測である．
 	 *
 	 *  ★このサイジングは 32bit ターゲット（musca_b1）の値である．本テストは
@@ -597,10 +602,13 @@ task1(EXINF exinf)
 	 *  ★プールが実際に返っていることの実証
 	 *
 	 *  del_mpf が TA_MEMALLOC のブロック領域を free_mpk しなければ，
-	 *  bump allocator の brk が周回ごとに進み（count が 0 に戻らない），
-	 *  MPK_SIZE を数周で使い切って acre_mpf が E_NOMEM になる．
-	 *  正常な実装では1周ごとに count が 0 に戻り brk がリセットされる
-	 *  ので，MPF_CYCLES 周まわしても消費は頭打ちである．
+	 *  ブロック領域（4+ROUND_MPF_T(64)*4 = 260B）が周回ごとに返らず
+	 *  count が 0 に戻らないため，brk の全域リセット（backstop）も
+	 *  256B の完全一致再利用（freelist に載るのは管理領域 16B だけ）も
+	 *  効かず，brk が単調に進んで MPK_SIZE を数周で使い切り acre_mpf が
+	 *  E_NOMEM になる．正常な実装では1周ごとに count が 0 に戻り brk が
+	 *  リセットされる（freelist 実装でも backstop として不変）ので，
+	 *  MPF_CYCLES 周まわしても消費は頭打ちである．
 	 */
 	for (i = 0U; i < MPF_CYCLES; i++) {
 		erid = acre_mpf(&cmpf);

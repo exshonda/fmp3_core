@@ -18,17 +18,21 @@
  *  カーネルメモリプールのサイズ
  *
  *  ★この値は変異controlの成立条件でもある．kernel/startup.cのプールは
- *  bump allocatorで，free_mempoolはcountが0になったときにだけbrkを
- *  先頭へ戻す（段階3b 訂正G）．したがって
+ *  バンプ確保＋完全一致サイズ再利用（freelist）で，free_mempoolはcount
+ *  が0になったときにbrkを先頭へ戻しfreelistを空にする（backstop）．
+ *  本テストの反復（手順8）は1周ごとにcountが0に戻るため，freelistの
+ *  再利用ではなくこのbackstopで消費が頭打ちになる．したがって
  *
  *    ・正常時：acre_mpf/del_mpfを1周するとcountが0に戻りbrkがリセット
- *              されるので，MPF_CYCLES回まわしても消費は1周分（272B前後）
- *              で頭打ちになる．
+ *              されるので，MPF_CYCLES回まわしても消費は1周分（280B前後．
+ *              各割付けに4Bのヘッダが付く）で頭打ちになる．
  *    ・del_mpfのTA_MEMALLOC解放を落とすと：1周ごとにブロック領域
- *              （ROUND_MPF_T(64)*4 = 256B）が返らずbrkが単調に進み，
- *              MPK_SIZEを7〜8周で使い切ってacre_mpfがE_NOMEMになる．
+ *              （4+ROUND_MPF_T(64)*4 = 260B）が返らずcountが0に戻らない
+ *              ため，backstopも256Bの完全一致再利用も効かず（freelistに
+ *              載るのは管理領域16Bだけ），brkが単調に進んでMPK_SIZEを
+ *              7〜8周で使い切りacre_mpfがE_NOMEMになる．
  *
- *  MPK_SIZE = 2048 は「1周分（272B前後）は十分入るが，MPF_CYCLES(=16)周
+ *  MPK_SIZE = 2048 は「1周分（280B前後）は十分入るが，MPF_CYCLES(=16)周
  *  ぶんの累積（4KB超）は入らない」ように選んである．
  */
 #ifndef MPK_SIZE
