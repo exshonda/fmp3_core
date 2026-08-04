@@ -55,12 +55,33 @@
 #define CMD_HANDSHAKE	1		/*  走査中の del/acre（手順4）  */
 #define CMD_FIRE_LONG	2		/*  quiesce 実証の割込み発生（手順5）  */
 #define CMD_QUIT		3
+#define CMD_FIRE_DRAIN	4		/*  完全ドレイン→enqueue（手順9）  */
+
+/*
+ *  手順9 で TASK2 が最初に眠る時間（単位: マイクロ秒）
+ *
+ *  ★TASK2 は TASK1 より高優先度なので，act_tsk された瞬間に PRC1 を奪う．
+ *  そこで最初に dly_tsk で眠り，その間に TASK1 が del_isr へ入って
+ *  「unlink（キューが空になる）→ TA_NOEXS → quiesce ループ」へ到達できる
+ *  ようにする．quiesce ループは周回ごとにジャイアントロックとCPUロックを
+ *  解放するので，起床した TASK2 はその窓で TASK1 を横取りして acre_isr できる．
+ *
+ *  ★短すぎて TASK1 が del_isr に入る前に TASK2 が acre してしまうと，
+ *  キューが空にならず本テストは空虚になる．その場合は変異 control
+ *  （旧リセット分岐の再導入）が倒れなくなるので必ず気づける
+ *  ＝control の成否が振り付けの成否を兼ねている．足りない場合は増やす
+ *  （減らさない）．調整したら最終値を記録すること．
+ */
+#define DRAIN_DELAY		10000U		/* 10ms */
 
 #ifndef TOPPERS_MACRO_ONLY
 extern void	task1(EXINF exinf);
+extern void	task2(EXINF exinf);
 extern void	task3(EXINF exinf);
 extern void	static_isr(EXINF exinf);
 extern void	dyn_isr(EXINF exinf);
 extern void	long_isr(EXINF exinf);
 extern void	ctx_isr(EXINF exinf);
+extern void	drain_isr_a(EXINF exinf);
+extern void	drain_isr_b(EXINF exinf);
 #endif /* TOPPERS_MACRO_ONLY */

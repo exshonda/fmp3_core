@@ -54,6 +54,9 @@
  *	(F) エラー：E_OBJ（未 ENA_DYNISR の intno／範囲外の intno／静的 ISR の削除）・
  *	    E_PAR（isrpri 範囲外）・E_RSATR・E_ID・E_NOID・E_NOEXS・E_CTX．
  *	(G) 削除後は当該 ISR が呼ばれなくなること．
+ *	(H) ★走査中にキューが完全に空になった後で acre_isr された ISR が，
+ *	    同一の割込み起動の中で拾われること（isrseq 単調化の直接の回帰．
+ *	    ISR段階の hardening 課題④）．
  *
  * 【この構成でしか実証できないこと／できないこと】
  *
@@ -76,16 +79,17 @@
  * 【使用リソース】
  *
  *	TASK1: 中優先度タスク，TA_ACT属性（静的・PRC1．主体）
+ *	TASK2: 高優先度タスク，TA_NULL属性（静的・PRC1．手順9 の横取り役）
  *	TASK3: 高優先度タスク，TA_ACT属性（静的・PRC2．手先）
  *	INTNO1（PRC1）: 静的 ISR_S4(isrpri 4)・ISR_S2(isrpri 2) ＋ ENA_DYNISR
- *	INTNO2（PRC2）: 静的 ISR なし ＋ ENA_DYNISR
+ *	INTNO2（PRC2）: 静的 ISR なし ＋ ENA_DYNISR（★手順9 の完全ドレインに使う）
  *	AID_ISR(4): 動的スロット4個
  *
  * 【チェックポイント】
  *
- *	PRC1（check_count[0]，TASK1）: 1..9 + check_finish(10)
+ *	PRC1（check_count[0]，TASK1）: 1..10 + check_finish(11)
  *	PRC2（check_count[1]，TASK3）: 1,2（出力は "Check point 2-1/2-2 passed."）
- *	  ＝ログ中の "Check point" 行は合計 12 本（check_finish 自身の1本を含む）
+ *	  ＝ログ中の "Check point" 行は合計 13 本（check_finish 自身の1本を含む）
  *	  ★この本数は実測で確かめ，違っていたら実測値を正とする．
  *
  * 【実装メモ】
@@ -130,6 +134,16 @@ static volatile uint32_t spin_sink;
  */
 static volatile ER		ctx_acre_ercd;
 static volatile ER		ctx_del_ercd;
+
+/*
+ *  ★走査中の完全ドレイン→enqueue（手順9・hardening 課題④）
+ */
+static volatile bool_t	dr_a_started;	/*  A の本体に入った  */
+static volatile bool_t	dr_a_finished;	/*  A の本体を抜けた  */
+static volatile bool_t	dr_a_timeout;	/*  A の待ちが上限に達した  */
+static volatile bool_t	dr_b_acred;		/*  TASK2 が B を生成し終えた  */
+static volatile bool_t	dr_b_fired;		/*  B の本体が呼ばれた  */
+static volatile ER_ID	dr_erid_b;		/*  B の ISRID（結果）  */
 
 /*
  *  PRC2 のタスクへの指令
@@ -256,6 +270,69 @@ ctx_isr(EXINF exinf)
 }
 
 /*
+ *  手順9 の A：キューに自分しかいない状態で走り，B が生成されるまで待つ
+ *
+ *  ★この待ちが「走査中にキューが完全に空になる」窓そのものである．
+ *  待ちは有界で，上限に達したら dr_a_timeout を立てて抜ける（QEMU を
+ *  ハングさせない）．
+ */
+void
+drain_isr_a(EXINF exinf)
+{
+	uint32_t	i;
+
+	intno2_clear();
+	isr_log_put('A');
+	dr_a_started = true;
+
+	for (i = 0U; i < SPIN_LIMIT && !dr_b_acred; i++) {
+	}
+	if (!dr_b_acred) {
+		dr_a_timeout = true;
+	}
+	dr_a_finished = true;
+}
+
+/*
+ *  手順9 の B：空になったキューへ acre_isr された ISR
+ *
+ *  ★2度目の ras_int をしていないのにこれが呼ばれることが，
+ *  isrseq の単調性（＝空キューでリセットしないこと）の証拠である．
+ */
+void
+drain_isr_b(EXINF exinf)
+{
+	intno2_clear();
+	isr_log_put('B');
+	dr_b_fired = true;
+}
+
+/*
+ *  PRC1 側の横取り役（手順9）
+ *
+ *  TASK1（MID）より高優先度なので act_tsk された瞬間に走るが，
+ *  最初に dly_tsk で眠って TASK1 を del_isr の quiesce まで進ませる．
+ *  起床後は quiesce のロック解放窓で TASK1 を横取りし，**空になった**
+ *  INTNO2 のキューへ B を acre_isr する．
+ */
+void
+task2(EXINF exinf)
+{
+	T_CISR	cisr;
+
+	(void) dly_tsk(DRAIN_DELAY);
+
+	cisr.isratr = TA_NULL;
+	cisr.exinf = (EXINF) 'B';
+	cisr.intno = INTNO2;
+	cisr.isr = drain_isr_b;
+	cisr.isrpri = 1;			/*  ★A と同じ isrpri（isrseq でしか区別できない）  */
+	dr_erid_b = acre_isr(&cisr);
+	dr_b_acred = true;
+	ext_tsk();
+}
+
+/*
  *  PRC2 側の手先
  */
 void
@@ -293,6 +370,11 @@ task3(EXINF exinf)
 			prc2_cmd = CMD_NONE;
 		}
 		else if (prc2_cmd == CMD_FIRE_LONG) {
+			(void) ras_int(INTNO2);
+			prc2_cmd = CMD_NONE;
+		}
+		else if (prc2_cmd == CMD_FIRE_DRAIN) {
+			/*  手順9：INTNO2 を1度だけ発火する（★2度目は無い）  */
 			(void) ras_int(INTNO2);
 			prc2_cmd = CMD_NONE;
 		}
@@ -378,9 +460,13 @@ task1(EXINF exinf)
 	 *    INTNO1 キューは静的 ISR_S4/ISR_S2 が常駐し，走査中に完全に空には
 	 *    ならないため（手順4のハンドシェイクでも enqueue 時点で A/C/S4 が
 	 *    残存），旧リセット挙動（キューが空になったときだけ isrseq を 0 へ
-	 *    戻す）でも本テストは通ってしまう．当該性質（完全ドレイン後の
-	 *    cur 以降位置への enqueue が走査中の cur に負けない）の回帰テストは
-	 *    スイート内に未整備 — hardening pass の課題．
+	 *    戻す）でも本テストは通ってしまう．
+	 *    ★この性質の回帰は hardening パス Task 3 で**手順9 に追加した**
+	 *    （INTNO2＝静的 ISR ゼロの動的専用キューを使い，走査中に完全ドレイン
+	 *    させてから同一 isrpri で acre する）．旧リセット分岐を戻すと手順9 が
+	 *    倒れることを変異 control で実演済みである．本手順（手順3）は
+	 *    引き続き「同一 isrpri の順序が isrseq タイブレークに依存すること」
+	 *    だけを検査する．
 	 */
 	cisr.isrpri = 3;
 	cisr.exinf = (EXINF) 'A';	erid = acre_isr(&cisr);	check_assert(erid > ISR_S4);
@@ -543,6 +629,90 @@ task1(EXINF exinf)
 	check_assert(isr_log_is("24"));
 	check_point(9);
 
+	/*
+	 *  9) ★走査中にキューが完全に空になってからの acre_isr
+	 *     （ISR段階の hardening 課題④。isrseq 単調化の直接の回帰）
+	 *
+	 *  INTNO2 は静的 ISR を1本も持たない動的専用の割込み番号である
+	 *  （システム全体としての「静的 CRE_ISR が1本以上」という cfg の要求は
+	 *  INTNO1 の ISR_S4/ISR_S2 が満たしている — kernel/interrupt.py の
+	 *  ENA_DYNISR チェックはシステム全体の本数で判定する）．
+	 *  そこへ A（isrpri 1）だけを生成して発火させると，PRC2 の call_isr は
+	 *  A を呼んでいる間，キューに A しか持たない．A の実行中に PRC1 から
+	 *  del_isr(A) すると，unlink の時点で **キューは完全に空** になる．
+	 *  その空のキューへ TASK2 が B（★A と同じ isrpri 1）を acre_isr する．
+	 *
+	 *  【検査する性質】isrseq はキューの生存期間を通じて単調なので，B の
+	 *  isrseq は A の isrseq より大きく，走査側の継続キー cur = (1, seqA) を
+	 *  上回る．したがって B は **同じ割込み起動の中で** 呼ばれる
+	 *  （2度目の ras_int をしていないのに 'B' がログに載る）．
+	 *  旧実装（キューが空のとき isrseq を 0 へ戻す）では B の isrseq が 0 に
+	 *  なって cur に負け，本起動では呼ばれなかった．ISR段階 Task 5 で
+	 *  リセットを撤去した裁定の直接の回帰である．
+	 *
+	 *  【振り付け】
+	 *   (1) TASK1(PRC1,MID): A を acre → TASK3 へ CMD_FIRE_DRAIN
+	 *   (2) TASK3(PRC2,HIGH): ras_int(INTNO2) → PRC2 で call_isr → A を実行
+	 *   (3) A の本体: 'A' を記録し dr_b_acred を待つ（有界）
+	 *   (4) TASK1: dr_a_started を見てから act_tsk(TASK2)
+	 *   (5) TASK2(PRC1,HIGH): 即座に dly_tsk(DRAIN_DELAY) で眠る
+	 *   (6) TASK1: del_isr(A) → unlink（★ここでキューが空）→ TA_NOEXS → quiesce
+	 *   (7) TASK2: 起床し，quiesce のロック解放窓で TASK1 を横取りして
+	 *              B を acre_isr（空のキューへ enqueue）→ dr_b_acred
+	 *   (8) A の本体: dr_b_acred を見て終了 → call_isr が走査を再決定し
+	 *              B を **同一起動で** 実行 → 'B' を記録
+	 *   (9) TASK1: quiesce 完了で del_isr(A) が E_OK を返す
+	 *
+	 *  【なぜ act_tsk を A の本体から呼ばないか】
+	 *  A の本体から act_tsk(TASK2) すると，「TASK1 が del_isr に入る前に
+	 *  TASK2 が走ってしまう」窓を排除できない．TASK1 自身が act_tsk して
+	 *  から del_isr を呼び，TASK2 は最初に眠る形にすると，TASK2 が起きる
+	 *  のは TASK1 が del_isr の中でロックを解放したとき（＝quiesce ループの
+	 *  中）に限られる．★それでも「TASK2 が早すぎる」可能性は完全には
+	 *  排除できないが，その場合キューは空にならず，変異 control（旧リセット
+	 *  分岐の再導入）が倒れなくなる．すなわち control の成否が振り付けの
+	 *  成否を兼ねている（本テストが空虚でないことの検出器である）．
+	 */
+	cisr.isratr = TA_NULL;
+	cisr.intno = INTNO2;
+	cisr.isr = drain_isr_a;
+	cisr.exinf = (EXINF) 'A';
+	cisr.isrpri = 1;
+	erid = acre_isr(&cisr);
+	check_assert(erid > ISR_S4);
+	id_a = (ID) erid;
+
+	isr_log_cnt = 0U;
+	dr_a_started = false;
+	dr_a_finished = false;
+	dr_a_timeout = false;
+	dr_b_acred = false;
+	dr_b_fired = false;
+	dr_erid_b = 0;
+
+	prc2_cmd = CMD_FIRE_DRAIN;
+
+	for (i = 0U; i < SPIN_LIMIT && !dr_a_started; i++) {
+	}
+	check_assert(dr_a_started);
+
+	check_ercd(act_tsk(TASK2), E_OK);		/*  TASK2 は即眠るのですぐ戻る  */
+	check_ercd(del_isr(id_a), E_OK);		/*  unlink→空→TA_NOEXS→quiesce  */
+	check_assert(dr_a_finished);			/*  quiesce の帰結（手順5と同型）  */
+	check_assert(!dr_a_timeout);
+	check_assert(dr_b_acred);
+	check_assert(dr_erid_b > ISR_S4);
+
+	/*  ★B が同一起動の走査で呼ばれる（2度目の ras_int はしていない）  */
+	for (i = 0U; i < SPIN_LIMIT && !dr_b_fired; i++) {
+	}
+	check_assert(dr_b_fired);
+	check_assert(isr_log_is("AB"));
+
+	check_ercd(del_isr((ID) dr_erid_b), E_OK);
+	check_ercd(del_isr(id_a), E_NOEXS);
+	check_point(10);
+
 	prc2_quit = true;
-	check_finish(10);
+	check_finish(11);
 }
