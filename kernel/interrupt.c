@@ -52,6 +52,14 @@
 /*
  *  トレースログマクロのデフォルト定義
  */
+#ifndef LOG_ISR_ENTER
+#define LOG_ISR_ENTER(isrid)
+#endif /* LOG_ISR_ENTER */
+
+#ifndef LOG_ISR_LEAVE
+#define LOG_ISR_LEAVE(isrid)
+#endif /* LOG_ISR_LEAVE */
+
 #ifndef LOG_DIS_INT_ENTER
 #define LOG_DIS_INT_ENTER(intno)
 #endif /* LOG_DIS_INT_ENTER */
@@ -135,7 +143,223 @@
 					(TMIN_INTPRI <= (intpri) && (intpri) <= TIPM_ENAALL)
 #endif /* VALID_INTPRI_CHGIPM */
 
-/* 
+/*
+ *  割込みサービスルーチンIDから割込みサービスルーチン管理ブロックを取り
+ *  出すためのマクロ
+ */
+#define INDEX_ISR(isrid)	((uint_t)((isrid) - TMIN_ISRID))
+#define get_isrcb(isrid)	(p_isrcb_table[INDEX_ISR(isrid)])
+
+/*
+ *  走査キー（isrpri, isrseq）の辞書式比較
+ *
+ *  「(pri1, seq1) が (pri2, seq2) より真に大きい」を判定する．call_isrの
+ *  走査が，ジャイアントロックを外してISR本体を呼んだ後に「次に呼ぶISR」を
+ *  再決定するために使う．
+ */
+#define ISR_KEY_GT(pri1, seq1, pri2, seq2)								\
+			(((pri1) > (pri2))											\
+				|| (((pri1) == (pri2)) && ((seq1) > (seq2))))
+
+/*
+ *  割込みサービスルーチンキューへの登録
+ *
+ *  キューは(isrpri, isrseq)の辞書式昇順に保たれる．isrpriが自分より真に
+ *  大きい最初の要素の直前へ挿入するので，同一isrpriの中ではenqueueした
+ *  順（＝isrseqの昇順）に並ぶ（dcre interrupt.c:182-195と同じ形）．
+ *
+ *  キューが空のときisrseqのカウンタを0へ戻す．これによりu32のラップは
+ *  実用上到達しない．★副作用として，走査中にキューが空になった後で
+ *  acre_isrされたISRは，走査側の継続キーより小さい世代番号を持つため
+ *  その割込みでは呼ばれない（次の割込みで呼ばれる）．安全側の脱落であり，
+ *  二重実行は起こらない．
+ *
+ *  ジャイアントロックを取得した状態で呼び出すこと．
+ */
+Inline void
+enqueue_isr(ISRQCB *p_isr_queue, ISRCB *p_isrcb)
+{
+	QUEUE	*p_entry;
+	PRI		isrpri = p_isrcb->p_isrinib->isrpri;
+
+	if (queue_empty(&(p_isr_queue->isr_queue))) {
+		p_isr_queue->isrseq = 0U;
+	}
+	p_isrcb->isrseq = p_isr_queue->isrseq;
+	p_isr_queue->isrseq += 1U;
+
+	for (p_entry = p_isr_queue->isr_queue.p_next;
+							p_entry != &(p_isr_queue->isr_queue);
+							p_entry = p_entry->p_next) {
+		if (isrpri < ((ISRCB *) p_entry)->p_isrinib->isrpri) {
+			break;
+		}
+	}
+	queue_insert_prev(p_entry, &(p_isrcb->isr_queue));
+}
+
+/*
+ *  割込みサービスルーチン呼出しキューの検索
+ *
+ *  cfgが生成するグローバルな適格intno表（isr_queue_list）を二分探索する．
+ *  この表はENA_DYNISRされたintnoだけを昇順に持つので，
+ *  ・範囲外のintno
+ *  ・CFG_INTの無いintno
+ *  ・ENA_DYNISRされていないintno
+ *  ・DEF_INHが競合するintno
+ *  はいずれもNULLになる．per-coreのビットマップ（check_intno_cfg）を使わ
+ *  ないため，判定結果が呼出しコアに依存しない．
+ *
+ *  dcre interrupt.c:267-293の転写（型がISRQCB *に変わるだけ）．
+ */
+Inline ISRQCB *
+search_isr_queue(INTNO intno)
+{
+	int_t	left, right, i;
+
+	if (tnum_isr_queue == 0) {
+		return(NULL);
+	}
+
+	left = 0;
+	right = tnum_isr_queue - 1;
+	while (left < right) {
+		i = (left + right + 1) / 2;
+		if (intno < isr_queue_list[i].intno) {
+			right = i - 1;
+		}
+		else {
+			left = i;
+		}
+	}
+	if (isr_queue_list[left].intno == intno) {
+		return(isr_queue_list[left].p_isr_queue);
+	}
+	else {
+		return(NULL);
+	}
+}
+
+/*
+ *  割込みサービスルーチン機能の初期化
+ */
+#ifdef TOPPERS_isrini
+
+/*
+ *  使用していない割込みサービスルーチン管理ブロックのリスト
+ *
+ *  ISRCBの先頭フィールドがQUEUE（isr_queue）なので，そのままfree-listの
+ *  リンクに流用する（dcre interrupt.c:202,229と同一）．
+ */
+QUEUE	free_isrcb;
+
+void
+initialize_isr(PCB *p_my_pcb)
+{
+	uint_t	i, j;
+	ISRCB	*p_isrcb;
+	ISRINIB	*p_isrinib;
+
+	/*
+	 *  割込みサービスルーチンはプロセッサ親和を持たない（ISRINIBに
+	 *  iprcid/affinityが無く，ISRCBにp_pcbが無い）．実行プロセッサは
+	 *  intnoの配線（CFG_INTのクラス）で決まるため，カーネルオブジェクト
+	 *  としては非親和である．したがってマスタプロセッサだけが初期化し，
+	 *  他プロセッサへの可視性は本関数の呼出し後のbarrier_syncが保証する
+	 *  （段階1のfree_tcb・段階3bのfree_dtqcbと同じ論証）．
+	 */
+	if (p_my_pcb->prcid == TOPPERS_MASTER_PRCID) {
+		for (i = 0; i < tnum_isr_queue; i++) {
+			queue_initialize(&(isr_queue_table[i].isr_queue));
+			isr_queue_table[i].isrseq = 0U;
+		}
+
+		/*
+		 *  静的生成ISRの初期化
+		 *
+		 *  isrorder_tableはisrid昇順である（cfgが生成する．dcreの挿入順
+		 *  からの意図的な逸脱で，理由はENA_DYNISRの有無で呼出し順序が
+		 *  変わらないようにするため）．この順にenqueue_isrすることで，
+		 *  キューの並びは「isrid昇順を基底とするisrpriの安定ソート」＝
+		 *  インライン連鎖の呼出し順序と完全に一致する．
+		 *
+		 *  ★p_isr_queueがNULLのISRは，ENA_DYNISRされていないintnoに
+		 *  登録された静的ISRである．インライン連鎖から直接呼ばれるので
+		 *  キューには入れない（dcreには無い分岐．dcreは全intnoをキュー化
+		 *  するためNULLになりえない）．
+		 */
+		for (i = 0; i < tnum_sisr; i++) {
+			j = INDEX_ISR(isrorder_table[i]);
+			p_isrcb = p_isrcb_table[j];
+			p_isrcb->p_isrinib = &(isrinib_table[j]);
+			p_isrcb->isrseq = 0U;
+			p_isrcb->running = 0U;
+			if (p_isrcb->p_isrinib->p_isr_queue != NULL) {
+				enqueue_isr(p_isrcb->p_isrinib->p_isr_queue, p_isrcb);
+			}
+		}
+
+		/*
+		 *  動的生成用スロットの初期化
+		 *
+		 *  free-listはFIFO（queue_insert_prevで末尾へ．段階1で裁定済み）．
+		 *  iは静的ループから引き継ぐ（dcre interrupt.c:217,224と同じ書き方）．
+		 */
+		queue_initialize(&free_isrcb);
+		for (j = 0; i < tnum_isr; i++, j++) {
+			p_isrcb = p_isrcb_table[i];
+			p_isrinib = &(aisrinib_table[j]);
+			p_isrinib->isratr = TA_NOEXS;
+			p_isrcb->p_isrinib = ((const ISRINIB *) p_isrinib);
+			p_isrcb->isrseq = 0U;
+			p_isrcb->running = 0U;
+			queue_insert_prev(&free_isrcb, &(p_isrcb->isr_queue));
+		}
+	}
+}
+
+#endif /* TOPPERS_isrini */
+
+/*
+ *  割込みサービスルーチンの呼出し
+ */
+#ifdef TOPPERS_isrcal
+
+/*
+ *  ★★これはTask 3の暫定実装である．Task 4でMP対応版へ全面的に置き換える．
+ *
+ *  この版はdcre interrupt.c:240-260の素朴な単方向走査であり，
+ *  「走査とacre_isr/del_isrが時間的に排他である」という単一プロセッサの
+ *  前提に依存している．FMP3では成立しないため，このままでは使えない．
+ *  型（ISRQCB *）と表の結線が正しいことをTask 3の時点で独立に検証する
+ *  ためだけに置いている．
+ */
+void
+call_isr(ISRQCB *p_isr_queue)
+{
+	QUEUE	*p_queue;
+	ISRCB	*p_isrcb;
+
+	for (p_queue = p_isr_queue->isr_queue.p_next;
+							p_queue != &(p_isr_queue->isr_queue);
+							p_queue = p_queue->p_next) {
+		p_isrcb = (ISRCB *) p_queue;
+		LOG_ISR_ENTER(ISRID(p_isrcb));
+		(*(p_isrcb->p_isrinib->isr))(p_isrcb->p_isrinib->exinf);
+		LOG_ISR_LEAVE(ISRID(p_isrcb));
+
+		if (p_queue->p_next != &(p_isr_queue->isr_queue)) {
+			/* ISRの呼出し前の状態に戻す */
+			if (sense_lock()) {
+				unlock_cpu();
+			}
+		}
+	}
+}
+
+#endif /* TOPPERS_isrcal */
+
+/*
  *  割込み管理機能の初期化
  */
 #ifdef TOPPERS_intini

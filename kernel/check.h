@@ -63,6 +63,7 @@
 #define VALID_CYCID(cycid)	(TMIN_CYCID <= (cycid) && (cycid) <= tmax_cycid)
 #define VALID_ALMID(almid)	(TMIN_ALMID <= (almid) && (almid) <= tmax_almid)
 #define VALID_SPNID(spnid)	(TMIN_SPNID <= (spnid) && (spnid) <= tmax_spnid)
+#define VALID_ISRID(isrid)	(TMIN_ISRID <= (isrid) && (isrid) <= tmax_isrid)
 
 /*
  *  優先度の範囲の判定
@@ -73,6 +74,12 @@
  *  データ優先度の範囲の判定
  */
 #define VALID_DPRI(dpri)	(TMIN_DPRI <= (dpri) && (dpri) <= TMAX_DPRI)
+
+/*
+ *  割込みサービスルーチン優先度の範囲の判定
+ */
+#define VALID_ISRPRI(isrpri) \
+				(TMIN_ISRPRI <= (isrpri) && (isrpri) <= TMAX_ISRPRI)
 
 /*
  *  相対時間の範囲の判定
@@ -307,6 +314,16 @@ check_dispatch_mystate(TCB **pp_selftsk)
 #define CHECK_ILUSE(exp) do {								\
 	if (!(exp)) {											\
 		ercd = E_ILUSE;										\
+		goto error_exit;									\
+	}														\
+} while (false)
+
+/*
+ *  オブジェクト状態エラーのチェック（E_OBJ）
+ */
+#define CHECK_OBJ(exp) do {									\
+	if (!(exp)) {											\
+		ercd = E_OBJ;										\
 		goto error_exit;									\
 	}														\
 } while (false)

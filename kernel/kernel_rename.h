@@ -176,6 +176,9 @@
  *  interrupt.c
  */
 #define initialize_interrupt		_kernel_initialize_interrupt
+#define initialize_isr				_kernel_initialize_isr
+#define call_isr					_kernel_call_isr
+#define free_isrcb					_kernel_free_isrcb
 
 /*
  *  exception.c
@@ -222,6 +225,15 @@
 #define tmax_almid					_kernel_tmax_almid
 #define alminib_table				_kernel_alminib_table
 #define p_almcb_table				_kernel_p_almcb_table
+#define tmax_isrid					_kernel_tmax_isrid
+#define tmax_sisrid					_kernel_tmax_sisrid
+#define isrinib_table				_kernel_isrinib_table
+#define aisrinib_table				_kernel_aisrinib_table
+#define p_isrcb_table				_kernel_p_isrcb_table
+#define isrorder_table				_kernel_isrorder_table
+#define tnum_isr_queue				_kernel_tnum_isr_queue
+#define isr_queue_list				_kernel_isr_queue_list
+#define isr_queue_table				_kernel_isr_queue_table
 #define tnum_def_inhno				_kernel_tnum_def_inhno
 #define inhinib_table				_kernel_inhinib_table
 #define tnum_cfg_intno				_kernel_tnum_cfg_intno

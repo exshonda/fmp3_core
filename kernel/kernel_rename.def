@@ -139,6 +139,9 @@ aalm_nfyinfo_table
 
 # interrupt.c
 initialize_interrupt
+initialize_isr
+call_isr
+free_isrcb
 
 # exception.c
 initialize_exception
@@ -181,6 +184,15 @@ p_cyccb_table
 tmax_almid
 alminib_table
 p_almcb_table
+tmax_isrid
+tmax_sisrid
+isrinib_table
+aisrinib_table
+p_isrcb_table
+isrorder_table
+tnum_isr_queue
+isr_queue_list
+isr_queue_table
 tnum_def_inhno
 inhinib_table
 tnum_cfg_intno

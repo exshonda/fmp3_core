@@ -119,7 +119,8 @@ sys_manage = rot_rdq.o mrot_rdq.o get_tid.o get_pid.o \
 		loc_cpu.o unl_cpu.o dis_dsp.o ena_dsp.o \
 		sns_ctx.o sns_loc.o sns_dsp.o sns_dpn.o sns_ker.o
 
-interrupt = intini.o dis_int.o ena_int.o clr_int.o ras_int.o prb_int.o \
+interrupt = isrini.o isrcal.o \
+		intini.o dis_int.o ena_int.o clr_int.o ras_int.o prb_int.o \
 		chg_ipm.o get_ipm.o
 
 exception = excini.o xsns_dpn.o

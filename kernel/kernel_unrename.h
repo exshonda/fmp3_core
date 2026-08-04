@@ -177,6 +177,9 @@
  *  interrupt.c
  */
 #undef initialize_interrupt
+#undef initialize_isr
+#undef call_isr
+#undef free_isrcb
 
 /*
  *  exception.c
@@ -223,6 +226,15 @@
 #undef tmax_almid
 #undef alminib_table
 #undef p_almcb_table
+#undef tmax_isrid
+#undef tmax_sisrid
+#undef isrinib_table
+#undef aisrinib_table
+#undef p_isrcb_table
+#undef isrorder_table
+#undef tnum_isr_queue
+#undef isr_queue_list
+#undef isr_queue_table
 #undef tnum_def_inhno
 #undef inhinib_table
 #undef tnum_cfg_intno

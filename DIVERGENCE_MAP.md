@@ -153,6 +153,13 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | test/test_dcre_mix.h（ISR段階 Task 2） | mod (dcre-port) | `extern void task1(EXINF exinf);` の直後に、混在構成のISRが使う `extern void mix_isr1(EXINF exinf);` を追加（`target_test.h` は既に include 済みで `INTNO1`/`INTNO1_INTATR`/`INTNO1_INTPRI` を提供する） | - |
 | test/test_dcre_mix.c（ISR段階 Task 2） | mod (dcre-port) | `task1` の直後に `mix_isr1`（中身は空）を追加。QEMU では実行しない（ビルド・cfg等価性検査のみ） | - |
 | test/test_dcre_mix.cfg（ISR段階 Task 2） | mod (dcre-port) | 8家族目（ISR）として `CFG_INT(INTNO1, …)`/`CRE_ISR(MIX_ISR1, …)`/`ENA_DYNISR(INTNO1)` を `CLASS(CLS_PRC1)` ブロック末尾（`CRE_MPF` の次）に追加し、`AID_ISR(2)` をクラス外（末尾）に追加。同一 `kernel_cfg.c` の中で `MIX_ISR1`（キュー方式・`_kernel_call_isr` 1行）と `ISR_SIO`（`serial.cfg` 由来、インライン連鎖）が共存することを実測確認（Task 2 Step 14）。★混在説明コメント中の `acre_*/del_*` は、`*/` の並びが C コメントを早期終了させるため（段階3a Task 2 と同じ罠、当該行に前例あり）`acre_* / del_*` とスペースを挟んだ（ブリーフの逐語表記からの意図的な最小逸脱。最初の実行でこの罠に落ち、両エンジンとも `syntax error` で `pass1` から MISMATCH になったことを実測してから修正した） | - |
+| kernel/interrupt.h（dcre動的ISR Task 3） | mod (dcre-port) | ISR のランタイムオブジェクトを新設した（FMP3 には従来存在しなかった）。`#include <queue.h>` を追加し、`ISRQCB`（★dcre に無い FMP3 の新設型。キューごとの enqueue 世代番号 `isrseq` を持つ）・`ISRINIB`・`ISRCB`（★dcre の2フィールドに `isrseq` と `running` を追加）・`ISR_ENTRY` の4型、`tnum_isr_queue`/`isr_queue_list`/`isr_queue_table`/`free_isrcb`/`tmax_isrid`/`tmax_sisrid`/`isrinib_table`/`aisrinib_table`/`isrorder_table`/`p_isrcb_table` の extern、`tnum_isr`/`tnum_sisr`、2レンジ `ISRID`、`initialize_isr`/`call_isr` の宣言を追加。`ISRID` は dcre の配列差分式（`interrupt.h:126`）ではなく段階2 `CYCID`・段階3a `SEMID`・段階3b `DTQID` と同型の INIB ポインタ差分の2レンジ式にした（FMP3 の CB はポインタ表経由の named static であるため） | - |
+| kernel/interrupt.c（dcre動的ISR Task 3） | mod (dcre-port) | `LOG_ISR_ENTER`/`LOG_ISR_LEAVE` のデフォルト定義、`INDEX_ISR`/`get_isrcb`、`ISR_KEY_GT`（★dcre に無い。走査の安定キー比較）、`enqueue_isr`（dcre `interrupt.c:182-195` + 空キューでの `isrseq` リセット）、`search_isr_queue`（dcre `:267-293` の転写。型が `ISRQCB *` に変わるだけ）、`QUEUE free_isrcb;`、`initialize_isr`（dcre `:207-231` + マスタ限定化 + `p_isr_queue == NULL` のスキップ）、`call_isr` の暫定版（Task 4 で置換）を追加。**ISR は非親和オブジェクトであり `iprcid`/`affinity`/`p_pcb` の充填は1行も書いていない**。`initialize_isr` がマスタ限定なのは共有データの初期化だからで、他プロセッサへの可視性は呼出し後の `barrier_sync` が保証する | - |
+| kernel/check.h（dcre動的ISR Task 3） | mod (dcre-port) | `VALID_ISRID`・`VALID_ISRPRI`・`CHECK_OBJ` を追加。3つとも dcre `check.h:64,73-74,235-240` と同一。段階3b の `VALID_DPRI` 追加と同じ前例 | - |
+| kernel/allfunc.h（dcre動的ISR Task 3） | mod (dcre-port) | `/* interrupt.c */` 節に `TOPPERS_isrini`/`TOPPERS_isrcal` を追加 | - |
+| kernel/Makefile.kernel（dcre動的ISR Task 3） | mod (dcre-port) | `interrupt =` 行に `isrini.o`/`isrcal.o` を追加。`KERNEL_FCSRCS` は不変 | - |
+| kernel/kernel_rename.def（dcre動的ISR Task 3） | mod (dcre-port) | `# interrupt.c` 節に `initialize_isr`/`call_isr`/`free_isrcb`、`# kernel_cfg.c` 節に `tmax_isrid`/`tmax_sisrid`/`isrinib_table`/`aisrinib_table`/`p_isrcb_table`/`isrorder_table`/`tnum_isr_queue`/`isr_queue_list`/`isr_queue_table` を追加（計12）。★`call_isr` のリネームは必須である（cfg が生成する inthdr が `_kernel_call_isr(...)` を呼ぶため） | - |
+| kernel/kernel_rename.h・kernel_unrename.h（dcre動的ISR Task 3） | mod (dcre-port, 生成物) | `utils/genrename.rb kernel` で再生成（手編集ではない）。各+12行・削除0行 | - |
 
 **★恒常出力の受容（ISR段階 Task 2、訂正D）**：ISR にはランタイムオブジェクトが
 無かったため、`AID_ISR` を `kernel_api.def` に登録した時点で（`cfgData` が登録済み
@@ -162,11 +169,22 @@ ISRINIB 表・ISRCB 実体・`p_isrcb_table`・`isrorder_table`・`tmax_isrid`/`
 の `kernel_cfg.c` 管理された差分、Task 2 Step 10 の12項目の許容リストと完全一致することを
 実測確認済み）。**ディスパッチ経路（`_kernel_inthdr_*` 本体）はバイト不変**であり
 （`test_int2` 構成、Task 2 Step 11）、加わるのはデータと起動時の O(N) ループ1本だけである。
-`.elf` のリンクは Task 3（`ISRQCB`/`ISR_ENTRY`/`ISRINIB`/`ISRCB` 型・`_kernel_call_isr`/
-`_kernel_initialize_isr` の実体定義）完了まで通らないため、ROM増分の「後」実測は本 Task では
-できない（Task 2 Step 16 の明示的な指示どおり、Task 3 完了後に測定し本段落へ反映する）。
 「前」のベースラインは Task 2 Step 1 で実測済み：`build/musca_b1-2core/fmp`
 （変更前・HEAD f1f1d53）＝ text=58960 / data=32 / bss=24748 バイト（`size` コマンド実測）。
+
+**★ROM増分の「後」実測（Task 3 Step 9、訂正D完了）**：Task 3 完了後の
+`build/musca_b1-2core/fmp` ＝ text=59452 / data=32 / bss=24820 バイト。
+増分は **text +492 / data +0 / bss +72** バイト。この構成の `_kernel_isrinib_table`
+（`build/musca_b1-2core/generated/kernel_cfg.c`）は静的ISR3個（`ISR_SIO`・
+`INTNO1_ISR`・`INTNO2_ISR`）、動的スロット0個（`AID_ISR` 未使用、`TNUM_ISRID
+== TNUM_SISRID`）、`tnum_isr_queue == 0`（`ENA_DYNISR` 未使用構成のため
+`isr_queue_table`/`isr_queue_list` は空）。見積りとの整合：bss +72 ≒
+`ISRCB`×3（`sizeof(ISRCB)`＝QUEUE(8)+ポインタ(4)+isrseq(4)+running(4)＝20バイト、
+32bit環境）＝60バイト＋`QUEUE free_isrcb`（8バイト）＝68バイトに整列パディング数バイトを
+加えた値で桁は一致。text +492 バイトは `isrinib_table`（`sizeof(ISRINIB)`×3＝
+20×3＝60）＋`isrorder_table`（4×3＝12）＋`p_isrcb_table`（4×3＝12）に加え、
+`initialize_isr`/`enqueue_isr`/`search_isr_queue`/`call_isr`（暫定版）の
+コード本体（残り約400バイト）で説明でき、桁の誤りは無い。
 
 種別: add=追加 / patch=部分改変 / replace=置換 / remove=削除 / none=無改変（差分ゼロだが，
 運用上の注意が必要なため記録目的で本表に載せている。現状 `cfg/` のみ）
