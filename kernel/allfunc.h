@@ -279,6 +279,8 @@
 /* interrupt.c */
 #define TOPPERS_isrini
 #define TOPPERS_isrcal
+#define TOPPERS_acre_isr
+#define TOPPERS_del_isr
 #define TOPPERS_intini
 #define TOPPERS_dis_int
 #define TOPPERS_ena_int

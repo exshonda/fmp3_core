@@ -169,11 +169,19 @@
  *  大きい最初の要素の直前へ挿入するので，同一isrpriの中ではenqueueした
  *  順（＝isrseqの昇順）に並ぶ（dcre interrupt.c:182-195と同じ形）．
  *
- *  キューが空のときisrseqのカウンタを0へ戻す．これによりu32のラップは
- *  実用上到達しない．★副作用として，走査中にキューが空になった後で
- *  acre_isrされたISRは，走査側の継続キーより小さい世代番号を持つため
- *  その割込みでは呼ばれない（次の割込みで呼ばれる）．安全側の脱落であり，
- *  二重実行は起こらない．
+ *  ★isrseqはキューの生存期間を通じて単調増加する．リセットしない
+ *  （段階4 Task 4のレビューで判明した合成の隙間を，Task 5でコントローラが
+ *  裁定して撤回した．元は「キューが空になったときisrseqを0へ戻す」実装
+ *  だったが，走査中（call_isrがジャイアントロックを外してISR本体を呼んで
+ *  いる間）にキューが一時的に空になり，その隙にacre_isrされたISRは
+ *  isrseqが0から振り直されるため，走査側の継続キーcurより小さくなり，
+ *  同一の割込み起動では拾われない．これはspec §5が保証する「同一起動内
+ *  での拾い上げ」に反する（安全側の脱落ではなく仕様違反）．単調カウンタ
+ *  であれば，ドレイン後のenqueueは必ず任意の走査中curより大きい値を得る
+ *  ため，この保証が無条件に回復する．u32のラップには1つのキューへ
+ *  システム寿命の間に2^32回enqueueする必要があり，実用上到達不能である
+ *  （リセットを正当化していたのと同じ論法を，リセットではなくラップの
+ *  受容に転用する）．
  *
  *  ジャイアントロックを取得した状態で呼び出すこと．
  */
@@ -183,9 +191,6 @@ enqueue_isr(ISRQCB *p_isr_queue, ISRCB *p_isrcb)
 	QUEUE	*p_entry;
 	PRI		isrpri = p_isrcb->p_isrinib->isrpri;
 
-	if (queue_empty(&(p_isr_queue->isr_queue))) {
-		p_isr_queue->isrseq = 0U;
-	}
 	p_isrcb->isrseq = p_isr_queue->isrseq;
 	p_isr_queue->isrseq += 1U;
 
@@ -481,6 +486,237 @@ call_isr(ISRQCB *p_isr_queue)
 }
 
 #endif /* TOPPERS_isrcal */
+
+/*
+ *  割込みサービスルーチンの生成
+ *
+ *  pk_cisr->exinfは，エラーチェックをせず，一度しか参照しないため，ロー
+ *  カル変数にコピーする必要がない（途中で書き換わっても支障がない）．
+ */
+#ifdef TOPPERS_acre_isr
+
+#ifndef LOG_ACRE_ISR_ENTER
+#define LOG_ACRE_ISR_ENTER(pk_cisr)
+#endif /* LOG_ACRE_ISR_ENTER */
+
+#ifndef LOG_ACRE_ISR_LEAVE
+#define LOG_ACRE_ISR_LEAVE(ercd)
+#endif /* LOG_ACRE_ISR_LEAVE */
+
+ER_ID
+acre_isr(const T_CISR *pk_cisr)
+{
+	ISRCB		*p_isrcb;
+	ISRINIB		*p_isrinib;
+	ISRQCB		*p_isr_queue;
+	ATR			isratr;
+	INTNO		intno;
+	ISR			isr;
+	PRI			isrpri;
+	ER			ercd;
+
+	LOG_ACRE_ISR_ENTER(pk_cisr);
+	CHECK_TSKCTX_UNL();
+
+	isratr = pk_cisr->isratr;
+	intno = pk_cisr->intno;
+	isr = pk_cisr->isr;
+	isrpri = pk_cisr->isrpri;
+
+	CHECK_VALIDATR(isratr, TARGET_ISRATR);
+	CHECK_PAR(FUNC_ALIGN(isr));
+	CHECK_PAR(FUNC_NONNULL(isr));
+	CHECK_PAR(VALID_ISRPRI(isrpri));
+
+	/*
+	 *  割込み番号の検査
+	 *
+	 *  ★dcre（interrupt.c:324）はここでCHECK_PAR(VALID_INTNO_CREISR(intno))を
+	 *  行うが，FMP3のVALID_INTNOは(prcid, intno)の2引数であり，呼出しコアの
+	 *  情報を要求する．acre_isrの結果が呼出しコアによって変わってはならない
+	 *  ので，範囲検査は行わず，cfgが生成するグローバルな適格intno表
+	 *  （isr_queue_list）の二分探索だけでintnoを検証する．
+	 *
+	 *  この結果，
+	 *    ・範囲外のintno
+	 *    ・CFG_INTの無いintno
+	 *    ・ENA_DYNISRされていないintno
+	 *    ・DEF_INHが競合するintno
+	 *  はいずれもE_OBJになる（dcreは1つ目をE_PARにするが，FMP3ではコア非依存に
+	 *  区別する手段が存在しない．意図的な逸脱である）．
+	 */
+	p_isr_queue = search_isr_queue(intno);
+	CHECK_OBJ(p_isr_queue != NULL);
+
+	lock_cpu();
+	acquire_glock();
+	if (tnum_isr == tnum_sisr || queue_empty(&free_isrcb)) {
+		ercd = E_NOID;
+	}
+	else {
+		p_isrcb = ((ISRCB *) queue_delete_next(&free_isrcb));
+		p_isrinib = (ISRINIB *)(p_isrcb->p_isrinib);
+		p_isrinib->isratr = isratr;
+		p_isrinib->exinf = pk_cisr->exinf;
+		p_isrinib->p_isr_queue = p_isr_queue;
+		p_isrinib->isr = isr;
+		p_isrinib->isrpri = isrpri;
+
+		/*
+		 *  del_isrはrunningが0になるまで待ってからfree-listへ戻すので，
+		 *  ここでのrunningは必ず0である．防御的に明示しておく．
+		 */
+		p_isrcb->running = 0U;
+
+		/*  isrseqはenqueue_isrが採番する  */
+		enqueue_isr(p_isr_queue, p_isrcb);
+		ercd = ISRID(p_isrcb);
+	}
+	release_glock();
+	unlock_cpu();
+
+  error_exit:
+	LOG_ACRE_ISR_LEAVE(ercd);
+	return(ercd);
+}
+
+#endif /* TOPPERS_acre_isr */
+
+/*
+ *  割込みサービスルーチンの削除
+ */
+#ifdef TOPPERS_del_isr
+
+#ifndef LOG_DEL_ISR_ENTER
+#define LOG_DEL_ISR_ENTER(isrid)
+#endif /* LOG_DEL_ISR_ENTER */
+
+#ifndef LOG_DEL_ISR_LEAVE
+#define LOG_DEL_ISR_LEAVE(ercd)
+#endif /* LOG_DEL_ISR_LEAVE */
+
+ER
+del_isr(ID isrid)
+{
+	ISRCB	*p_isrcb;
+	ISRINIB	*p_isrinib;
+	ER		ercd;
+
+	LOG_DEL_ISR_ENTER(isrid);
+	/*
+	 *  ★CHECK_TSKCTX_UNL_MYSTATE（段階3aの訂正C）は使わない．訂正Cは
+	 *  「del_*が待ちタスクを解除するのでディスパッチ判断が要る」場合の
+	 *  規約であり，割込みサービスルーチンにはオブジェクト固有の待ち
+	 *  キューが無く，del_isrは1つのタスクも待ち解除しない．したがって
+	 *  ディスパッチ判断そのものが不要である（dcre interrupt.c:369も
+	 *  CHECK_TSKCTX_UNL()である）．
+	 */
+	CHECK_TSKCTX_UNL();
+	CHECK_ID(VALID_ISRID(isrid));
+	p_isrcb = get_isrcb(isrid);
+
+	lock_cpu();
+	acquire_glock();
+	if (p_isrcb->p_isrinib->isratr == TA_NOEXS) {
+		ercd = E_NOEXS;
+	}
+	else if (isrid <= tmax_sisrid) {
+		ercd = E_OBJ;
+	}
+	else {
+		/*
+		 *  キューから外す．これ以降，call_isrの走査はこのISRCBを拾わない
+		 *  （走査はジャイアントロックの下でキューを辿るため，本関数が
+		 *  ロックを保持している間にキューが読まれることはない）．
+		 */
+		queue_delete(&(p_isrcb->isr_queue));
+
+		/*
+		 *  ★TA_NOEXSを「quiesceの前」に書く理由（訂正B）
+		 *
+		 *  下のquiesceループはジャイアントロックとCPUロックを解放して
+		 *  待つ．その隙に別のタスクが同じisridへdel_isrを呼ぶと，
+		 *  isratrがまだTA_NOEXSでなければE_NOEXSの枝に落ちず，すでに
+		 *  外したキューエントリに対してqueue_deleteを再実行してしまう．
+		 *  queue_deleteは削除済みエントリの古いp_prev/p_nextを書き換える
+		 *  ので，キューが壊れる．先にTA_NOEXSを書けば，後続のdel_isrは
+		 *  E_NOEXSを返して何もしない（オブジェクトはこの時点で論理的に
+		 *  削除済みなので，これは正しい意味論である）．
+		 *
+		 *  ★段階3bの不変量「属性の読みはTA_NOEXSの書込みより前で完了
+		 *  していること」は，ISRには適用されない．TA_NOEXSは((ATR)(-1))
+		 *  ＝全ビットが1なので，TA_NOEXSを書いた後に属性をビット検査
+		 *  （atr & TA_MBALLOC 等）すると必ず真になってしまう，という
+		 *  のがあの不変量の理由である．割込みサービスルーチンのisratrは
+		 *  ビット検査にもマスク比較にも使われず（== TA_NOEXSの同値比較と
+		 *  代入だけである），call_isrはisratrを一切読まない．したがって
+		 *  早く書いても誤判定する式が存在しない．
+		 *
+		 *  ★ISRID(p_isrcb)はp_isrinibポインタの差分で求めるので，
+		 *  isratrがTA_NOEXSになってもcall_isr側のLOG_ISR_LEAVEは
+		 *  正しいIDを得る．
+		 */
+		p_isrinib = (ISRINIB *)(p_isrcb->p_isrinib);
+		p_isrinib->isratr = TA_NOEXS;
+
+		/*
+		 *  quiesce：他プロセッサで当該ISRの本体が実行中の間，待つ．
+		 *
+		 *  【保証する意味論】del_isrがE_OKを返した時点で，対象の割込み
+		 *  サービスルーチンは実行中でなく，以後実行されない．したがって
+		 *  del_isrの完了後は，exinfの指す資源を安全に解放できる．
+		 *  （dcreは単一プロセッサなのでこの保証が構造的に成立していた．
+		 *  FMP3では明示的に待たないと成立しない — Codex指摘 #2）
+		 *
+		 *  【待ち方】ジャイアントロックとCPUロックを解放し，
+		 *  delay_for_interruptを挟んで取り直す．これはwait_tmout /
+		 *  wait_tmout_ok（wait.c:126-131, 152-157）とまったく同じ5行で
+		 *  あり，汎用カーネルに既にある正統な待ち方である．
+		 *
+		 *  【デッドロックが起こらないこと】
+		 *  (a) runningのビットを立てるのも落とすのもcall_isrだけであり，
+		 *      立てた直後にISR本体を呼び，戻った直後に落とす．ISR本体は
+		 *      TOPPERSのISR規約により短時間で完了するので，待ち時間は
+		 *      ISR本体の実行時間で有界である．
+		 *  (b) 待っている間，本関数はジャイアントロックを保持していない．
+		 *      したがって他コアのcall_isrはロックを取ってrunningを落とせる．
+		 *  (c) 待っている間，本関数はCPUロックも保持していない（さらに
+		 *      delay_for_interruptで割込みを受け付ける）．したがって
+		 *      自コアの割込み処理やディスパッチが阻害されない．
+		 *  (d) 自コアのビットが立っていることはない．割込みハンドラが
+		 *      走っている間，そのコアではタスクが走らないので，del_isrを
+		 *      呼んでいるタスクのコアで当該ISRが実行中ということは
+		 *      ありえない．すなわち待つ相手は必ず他コアである．
+		 *  (e) 待っている間に自コアが当該intnoの割込みを受けても，対象の
+		 *      ISRCBはすでにキューから外れているので走査に拾われない．
+		 *      自分で自分を待つ状態にはならない（★これは上のqueue_delete
+		 *      を待機より前に置いていることに依存する）．
+		 *
+		 *  【本関数は自プロセッサのPCBを一切参照しない】ので，待機中に
+		 *  このタスクが他プロセッサへマイグレートしても影響がない
+		 *  （段階2のp_pcb-stale問題は本関数には存在しない）．
+		 */
+		while (p_isrcb->running != 0U) {
+			release_glock();
+			unlock_cpu();
+			delay_for_interrupt();
+			lock_cpu();
+			acquire_glock();
+		}
+
+		/*  free-listはFIFO（queue_insert_prevで末尾へ．段階1で裁定済み）  */
+		queue_insert_prev(&free_isrcb, &(p_isrcb->isr_queue));
+		ercd = E_OK;
+	}
+	release_glock();
+	unlock_cpu();
+
+  error_exit:
+	LOG_DEL_ISR_LEAVE(ercd);
+	return(ercd);
+}
+
+#endif /* TOPPERS_del_isr */
 
 /*
  *  割込み管理機能の初期化
