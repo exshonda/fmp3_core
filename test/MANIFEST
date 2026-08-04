@@ -50,6 +50,9 @@ test_dcre4.h
 test_dcre5.c
 test_dcre5.cfg
 test_dcre5.h
+test_dcre6.c
+test_dcre6.cfg
+test_dcre6.h
 test_dcre_mix.c
 test_dcre_mix.cfg
 test_dcre_mix.h
