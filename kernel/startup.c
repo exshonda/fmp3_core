@@ -484,11 +484,37 @@ typedef struct {
  *  ユーザ領域が sizeof(FREEBLK)（ポインタ1個）より小さい割付け（現行
  *  カーネルでは 64bit ターゲットの sizeof(MPFMB) * 1 == 4B が該当）で
  *  は，この書込みがユーザ領域の末尾を越える．ただし越える範囲は
- *  [user + size, user + sizeof(FREEBLK)) であり，次の割付けのヘッダは
- *  最速でも user + size + sizeof(MPHDR) から始まる．
+ *  [user + size, user + sizeof(FREEBLK)) である．
+ *
+ *  ★次の割付けのヘッダの最速到達番地の導出（2026-08-04 レビューで訂正：
+ *  当初「user + size + sizeof(MPHDR)」と書いたが誤りだった。反例：64bit
+ *  （sizeof(MPHDR)==8），本割付け size=4，次の割付け alignment=8，
+ *  user ≡ 0 (mod 8) のとき，brk（本割付け後）= user+4 → +sizeof(MPHDR)
+ *  = user+12 → align_up(user+12, 8) = user+16 → header2 = user+8。
+ *  これは「最速でも user+size+sizeof(MPHDR) = user+12」という当初の
+ *  主張より小さい。正しい下界は以下のとおり：
+ *
+ *  alloc_mempool が生成する「ユーザ領域先頭（aligned）」は常に
+ *  alignment の倍数であり，alignment は常に2の巾乗かつ sizeof(size_t)
+ *  以上（冒頭の assert）——2の巾乗どうしのこの大小関係から alignment
+ *  は sizeof(size_t)（== sizeof(MPHDR)，mphdr_size_check）の倍数になる。
+ *  よって aligned も sizeof(MPHDR) の倍数，ヘッダ番地（aligned -
+ *  sizeof(MPHDR)）も sizeof(MPHDR) の倍数——これはプール先頭の最初の
+ *  割付けを含め全世代で帰納的に成立する。したがって次のヘッダ番地
+ *  header2 も sizeof(MPHDR) の倍数であり，かつ brk は前進のみ（後退
+ *  しない）なので header2 >= user + size。user 自身も sizeof(MPHDR)
+ *  の倍数なので，header2 - user は「sizeof(MPHDR) の倍数」かつ
+ *  「size 以上」——0 < size < sizeof(MPHDR) のときこれを満たす最小の
+ *  倍数はちょうど sizeof(MPHDR) 自身。すなわち header2 の最速到達番地
+ *  は user + sizeof(MPHDR)（上の反例が正しくこの値 user+8 を実現して
+ *  いる。タイトな下界であり，これより早く到達することはない）。
+ *
  *  sizeof(FREEBLK) == sizeof(void *) == sizeof(size_t) == sizeof(MPHDR)
- *  なので，はみ出しは必ず「自ユーザ領域末尾〜次ヘッダ直前の死領域（誰
- *  も読み書きしないパディング）」に収まり，他の生きたデータを壊さない．
+ *  なので，この最速到達番地 user + sizeof(MPHDR) は，はみ出し範囲の
+ *  上端 user + sizeof(FREEBLK) にちょうど一致する（半開区間なので
+ *  この番地自体ははみ出し範囲の外）．よってはみ出しは必ず「自ユーザ
+ *  領域末尾〜次ヘッダ直前の死領域（誰も読み書きしないパディング）」に
+ *  収まり，他の生きたデータを壊さない．
  *  size == 0 の割付けは非対応（現行の全呼出し側は CHECK_PAR とあふれ
  *  検査により size > 0 を保証している．将来呼出し側を追加する場合は
  *  この不変を維持すること）．
@@ -663,6 +689,31 @@ free_mempool(MB_T *mempool, void *ptr)
 	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
 	FREEBLK		*p_freeblk = ((FREEBLK *) ptr);
 
+	/*
+	 *  ★契約：同一番地を，再割付されるまでの間に二重に free_mempool へ
+	 *  渡してはならない（呼出し側＝カーネル内部コードの責務．外部から
+	 *  渡された ptr ではなく，カーネル自身が管理する DTQMB/PDQMB/MPFMB/
+	 *  STK_T 領域のみが対象）．
+	 *
+	 *  違反した場合の失敗モード（意図的に記録．ガードは入れない）：
+	 *  二重解放された番地を next が自分自身を指す形で freelist へ push
+	 *  してしまい，自己循環ができる．以後の alloc_mempool の走査は
+	 *  ・サイズが一致する要求では，まだ freelist 上に残っている（かつ
+	 *    別の呼出し元が生きたポインタとして保持している）番地をもう
+	 *    一度払い出してしまう（多重払い出し＝エイリアシング）．
+	 *  ・サイズが一致しない要求では，走査が自己循環から抜けられず
+	 *    無限ループしてロックを保持し続ける（カーネルロックアップ）．
+	 *  旧実装（bump のみ）の二重解放は count の帳簿を狂わせるだけで
+	 *  ハングしなかったため，本実装はこの点で質的に悪い失敗モードを
+	 *  持つ．★ガードを入れない理由：現行の呼出し側（mempfix.c・
+	 *  dataqueue.c・pridataq.c・task_manage.c）を全数確認し，正常系・
+	 *  ロールバック系のいずれも同一番地を二重解放しないことを確認済み
+	 *  （grep によるコード読解での確認．潜在＝将来の呼出し側追加時の
+	 *  リスクであり，現行コードで到達する経路は無い）．O(freelist長) の
+	 *  メンバーシップ走査は現行の呼出し側に対して無駄なコスト，先頭
+	 *  ノードのみの簡易検査は多重 push を捕まえられない偽の安心にしか
+	 *  ならないため，どちらも実装しない（実装計画レビューでの裁定）．
+	 */
 	p_freeblk->next = p_mempoolcb->freelist;
 	p_mempoolcb->freelist = p_freeblk;
 	p_mempoolcb->count -= 1;
