@@ -165,6 +165,11 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | test/test_dcre5.h（dcre動的ISR Task 6） | add (dcre-port) | 上記テストのヘッダ（優先度定数・`INTNO_UNOPTED`/`INTNO_BAD`・`ISR_LOG_SIZE`/`SPIN_LIMIT`/`LONG_ISR_SPIN`・`CMD_*`・関数プロトタイプ）。ブリーフの記述をそのまま採用（`LONG_ISR_SPIN = 2000000U` で変異control(1)の成立を実測確認したため増量は不要だった） | - |
 | test/MANIFEST（dcre動的ISR Task 6） | mod (dcre-port) | `test_dcre4.h` の後・`test_dcre_mix.c` の前（アルファベット順、`test_dcre4` < `test_dcre5` < `test_dcre_mix`）に `test_dcre5.c`/`test_dcre5.cfg`/`test_dcre5.h` の3行を追加 | - |
 | test/testexec.rb（dcre動的ISR Task 6） | mod (dcre-port) | `"dcre4" => { SRC: "test_dcre4" },` の後・`"dcremix"` の前に `"dcre5" => { SRC: "test_dcre5" },` を追加 | - |
+| test/test_dcre_mix_ma.c（ISR最終レビュー Important #3 対応） | add (dcre-port) | マルチaffinityクラス（`CLS_ALL_PRC1`）上の `ENA_DYNISR` 生成検査用サンプル。`test_dcre_mix.c` と同型（build-only、実行時は即 `check_finish(1)`）。QEMU 実行は不要 | - |
+| test/test_dcre_mix_ma.cfg（ISR最終レビュー Important #3 対応） | add (dcre-port) | 上記のシステムコンフィギュレーションファイル。`CFG_INT`/`CRE_ISR(MA_ISR1)`/`ENA_DYNISR` を，affinityPrcList が2以上のクラス（`CLS_ALL_PRC1`）の囲みの中に置く。**kria_r5-2core専用**（他4ターゲットは NGKI5184／per-prcid intno 符号化により E_RSATR になることを実測確認済み。詳細は上記「既知・対処しない事項」の 2026-08-04 エントリ参照）。`AID_ISR(1)` は `MA_ISR1` 自身で訂正E ガードを満たす | - |
+| test/test_dcre_mix_ma.h（ISR最終レビュー Important #3 対応） | add (dcre-port) | 上記のヘッダ（`task1`/`ma_isr1` のプロトタイプ）。`test_dcre_mix.h` と同型 | - |
+| test/MANIFEST（ISR最終レビュー Important #3 対応） | mod (dcre-port) | `test_dcre_mix.h` の後・`test_dlynse.c` の前（アルファベット順、`.` (0x2E) < `_` (0x5F) のため `test_dcre_mix.h` < `test_dcre_mix_ma.c`）に `test_dcre_mix_ma.c`/`test_dcre_mix_ma.cfg`/`test_dcre_mix_ma.h` の3行を追加 | - |
+| test/testexec.rb（ISR最終レビュー Important #3 対応） | mod (dcre-port) | `"dcremix" => { SRC: "test_dcre_mix" },` の後・`"dlynse"` の前に `"dcremixma" => { SRC: "test_dcre_mix_ma" },` を追加 | - |
 
 **★恒常出力の受容（ISR段階 Task 2、訂正D）**：ISR にはランタイムオブジェクトが
 無かったため、`AID_ISR` を `kernel_api.def` に登録した時点で（`cfgData` が登録済み
@@ -621,6 +626,42 @@ Task 4/5 は関数本体のみを追加したため、という理解と整合�
   根本原因の調査はTask 13のスコープ外（本タスクの4件の既知欠陥のいずれにも該当しない）
   のため行っていない。**事実（7回・PRC1・非致命的）と、musca_b1と「同型かもしれない」という
   推測は分けて記録する**。pristine は未改変（調査は既存のビルド成果物の実行のみで行った）。
+
+- **（2026-08-04 発見／ISR最終レビュー Important #3 対応）`CFG_INT`（したがって同一
+  クラス制約により `ENA_DYNISR` も）は，intno の符号化方式に関わらず，**現時点で
+  サポートされている全5ターゲットのうち kria_r5 を除く4つで**，affinityPrcList が
+  2以上のクラスの中に書くと E_RSATR になる。** musca_b1/rp2350_pico2 は intno 自体が
+  per-prcid 符号化（`kernel/interrupt.py:151-164` の汎用検査が捕まえる。訂正Hが
+  最初に確認した事実）だが，**kria_arm64（GIC）・polarfire_soc_kit（PLIC）は
+  intno がグローバル（プロセッサ間で同一値）でも同じく止まる**——
+  `arch/arm64_gcc/common/gic_kernel.py` / `arch/riscv_gcc/common/plic_kernel.py` の
+  `TargetCheckCfgInt`（NGKI5184：「複数プロセッサでの割込み受付は動作するはずだが
+  未テストのため現状サポートしない」というコメントつきの明示的な E_RSATR）が原因。
+  これは dcre / ISR 移植とは無関係な，既存のアーキ層の制約であり，本ブランチが
+  持ち込んだものではない（`gic_kernel.py`/`plic_kernel.py` は計画C Task 4/A で
+  新規移植した際に，対応する pristine `.trb`（`arch/arm64_gcc/common/gic_kernel.trb`／
+  `arch/riscv_gcc/common/plic_kernel.trb`）の `TargetCheckCfgInt` をそのまま
+  移植したものであり，動作は pristine と同一）。
+  **kria_r5（arm_gcc/zynqmp_r5）だけがこの検査を持たない**。原因を pristine の
+  ソースまで遡って確認した：`arch/arm64_gcc/zynqmp/chip_kernel.trb:29` は
+  `IncludeTrb("gic_kernel.trb")` するが，`arch/arm_gcc/zynqmp_r5/chip_kernel.trb`
+  （pristine，全39行）には対応する `IncludeTrb` が**存在しない**——`core_kernel.trb`
+  しか読み込まない。すなわちこれは**upstream の R5 ポート自体が最初から持っていない
+  非対称**であり，`target/kria_r5_gcc/*.py`（計画C Task 8/10，本 DIVERGENCE_MAP
+  33-35行目）の Python 移植は pristine の構造を忠実に反映したもので，移植側の
+  見落としではない。結果として **`test/test_dcre_mix_ma.cfg`（`CLS_ALL_PRC1`，
+  affinityPrcList=[1, 2]）は kria_r5-2core でのみ生成が通り**，
+  `build/kria_r5-2core-tmixma/generated/kernel_cfg.c` の
+  `_kernel_inh_table_prc1[0x28]`／`_kernel_inh_table_prc2[0x28]` の両方が同一の
+  `_kernel_inthdr_40` を指し，`_kernel_inthdr_40` は同一の `_kernel_isr_queue_table[0]`
+  （`_kernel_tnum_isr_queue == 1`）を呼ぶことを実測で確認した（`cfg_equivalence.sh`
+  は同構成で `RESULT = MATCH`）。**runtime での同一キュー2コア並行走査は今回も
+  未実証のまま**（QEMU実行はこの追加のスコープ外，コード検査では健全）。
+  この非対称自体（kria_r5 に NGKI5184 相当の安全網が無いこと）は，将来 kria_r5-2core
+  で「動作するはずだが未テスト」の機能を意図せず使ってしまう余地として記録する
+  価値はあるが，**アーキ層（pristine）の変更が要る話であり，本 ISR 移植のスコープ外**
+  のため，コード変更は行わない。pristine は本追加では未改変（新規ファイルの追加と
+  台帳記載のみ）
 
 ## 期限付きの逸脱
 

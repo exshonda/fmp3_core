@@ -53,6 +53,9 @@ test_dcre5.h
 test_dcre_mix.c
 test_dcre_mix.cfg
 test_dcre_mix.h
+test_dcre_mix_ma.c
+test_dcre_mix_ma.cfg
+test_dcre_mix_ma.h
 test_dlynse.c
 test_dlynse.cfg
 test_dlynse.h

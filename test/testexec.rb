@@ -93,6 +93,7 @@ TEST_SPEC = {
   "dcre4"    => { SRC: "test_dcre4" },
   "dcre5"    => { SRC: "test_dcre5" },
   "dcremix"  => { SRC: "test_dcre_mix" },
+  "dcremixma" => { SRC: "test_dcre_mix_ma" },
   "dlynse"   => { SRC: "test_dlynse" },
   "dtq1"     => { SRC: "test_dtq1" },
   "exttsk"   => { SRC: "test_exttsk", CDL: "test_pf_bitkernel" },

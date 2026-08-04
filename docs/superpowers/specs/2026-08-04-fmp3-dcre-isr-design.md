@@ -473,8 +473,48 @@ spec §5 は「同一 intno の複数コア並行走査」を前提に設計し�
   走らせ、その最中に PRC1 のタスクから `del_isr` を呼ぶ。これは「他コアで実行中の ISR を
   del する」ものであり、spec §4 の保証そのものである。
 - **「同一キューの 2 コア同時走査」は musca_b1 では実証できない**。設計論証（spec §5）と
-  コード検査、および polarfire_soc_kit / kria_r5 でのビルド・等価性で代替する。
-  この不足を Task 7 の申し送りに**正直に**書く。
+  コード検査で代替する。
+
+**訂正H 追記（最終レビュー Important #3、`test/test_dcre_mix_ma.cfg` 実測）**：
+上の「一方、PLIC/GIC のグローバル割込みを持つターゲットでは到達可能である」という
+記述は，実際には**過度に楽観的だった**。実測（`build/kria_arm64-tmixma`、
+`cmake --build` 実行）で判明した事実は次の通り：
+
+- **kria_arm64（GIC）・polarfire_soc_kit（PLIC）は，intno がグローバルでも
+  `CFG_INT`（したがって `ENA_DYNISR` も同一クラス）を affinityPrcList が
+  2以上のクラスの中には書けない**。`arch/arm64_gcc/common/gic_kernel.py` /
+  `arch/riscv_gcc/common/plic_kernel.py` の `TargetCheckCfgInt`（NGKI5184：
+  「複数プロセッサでの割込み受付は動作するはずだが未テストのため現状
+  サポートしない」）が，intno の符号化方式に関係なく **E_RSATR** で止める。
+  これは dcre / ISR 移植とは無関係の，既存の（pristine な）アーキ層の制約
+  であり，本ブランチが持ち込んだものではない。
+- **kria_r5（arm_gcc/zynqmp_r5）だけがこの検査を持たない**：
+  `target/kria_r5_gcc/target_kernel.py` は `chip_kernel.py` だけを
+  `IncludeTrb` し，kria_arm64 側のように `chip_kernel.py` から
+  `gic_kernel.py` を `IncludeTrb` していない。`arch/arm_gcc/common/`
+  には `gic_kernel.trb`（pristine，未 `.py` 化）はあるが，どの `.py` からも
+  参照されない。pristine の `chip_kernel.trb`（zynqmp_r5）自体にもこの
+  安全網は無く，**upstream の R5 ポートが最初から持っていない非対称**である
+  ことをソース突き合わせで確認した（今回の dcre 移植が生んだ抜けではない）。
+- したがって，**生成レベルの実証は `kria_r5-2core` でのみ可能**であり，
+  `test/test_dcre_mix_ma.cfg`（`CLS_ALL_PRC1`，`INTNO1`=40，
+  affinityPrcList=[1, 2]）で実測した：生成物 `kernel_cfg.c` の
+  `_kernel_inh_table_prc1[0x28]` と `_kernel_inh_table_prc2[0x28]` の
+  **両方**が同一の `_kernel_inthdr_40` を指し，その `_kernel_inthdr_40` は
+  同一の `_kernel_isr_queue_table[0]`（`_kernel_tnum_isr_queue == 1`）を
+  呼ぶ。すなわち，per-prcid の DEF_INH 相当のエントリが affinityPrcList の
+  要素数（2個）ぶん作られ，いずれも同一キュー／同一 inthdr を指すことを
+  cfg 生成物から実証した。`tools/cfg_equivalence.sh` は同構成で
+  `RESULT = MATCH`（Python 実装と Ruby オラクルが同一生成物を出す）。
+- **runtime の同一キュー2コア並行走査は未実証のまま**（kria_r5-2core の
+  QEMU 実行は本検査の対象外，コード検査では健全）。musca_b1 では構成不能
+  （intno の per-prcid 符号化），kria_arm64/polarfire では上記 NGKI5184 が
+  ブロックするため，runtime 実証には NGKI5184 自体を緩める（アーキ層の
+  変更，本ブランチのスコープ外）か，kria_r5-2core で実際に走らせる
+  QEMU 検証が必要——いずれも今回は行っていない。
+
+この不足（および NGKI5184 の適用範囲がターゲット非依存であるという
+発見）を Task 7 の申し送りに**正直に**書く。
 
 ---
 
