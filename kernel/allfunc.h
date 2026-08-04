@@ -163,6 +163,8 @@
 #define TOPPERS_dtqsnd
 #define TOPPERS_dtqfsnd
 #define TOPPERS_dtqrcv
+#define TOPPERS_acre_dtq
+#define TOPPERS_del_dtq
 #define TOPPERS_snd_dtq
 #define TOPPERS_psnd_dtq
 #define TOPPERS_tsnd_dtq

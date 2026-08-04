@@ -103,6 +103,9 @@
 #define send_data					_kernel_send_data
 #define force_send_data				_kernel_force_send_data
 #define receive_data				_kernel_receive_data
+#define free_dtqcb					_kernel_free_dtqcb
+#define tmax_sdtqid					_kernel_tmax_sdtqid
+#define adtqinib_table				_kernel_adtqinib_table
 
 /*
  *  pridataq.c

@@ -90,6 +90,7 @@ eventflag = flgini.o flgcnd.o acre_flg.o del_flg.o set_flg.o clr_flg.o \
 		wai_flg.o pol_flg.o twai_flg.o ini_flg.o ref_flg.o
 
 dataqueue = dtqini.o dtqenq.o dtqfenq.o dtqdeq.o dtqsnd.o dtqfsnd.o dtqrcv.o \
+		acre_dtq.o del_dtq.o \
 		snd_dtq.o psnd_dtq.o tsnd_dtq.o fsnd_dtq.o \
 		rcv_dtq.o prcv_dtq.o trcv_dtq.o ini_dtq.o ref_dtq.o
 

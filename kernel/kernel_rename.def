@@ -82,6 +82,9 @@ dequeue_data
 send_data
 force_send_data
 receive_data
+free_dtqcb
+tmax_sdtqid
+adtqinib_table
 
 # pridataq.c
 initialize_pridataq

@@ -104,6 +104,9 @@
 #undef send_data
 #undef force_send_data
 #undef receive_data
+#undef free_dtqcb
+#undef tmax_sdtqid
+#undef adtqinib_table
 
 /*
  *  pridataq.c
