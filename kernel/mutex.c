@@ -493,9 +493,12 @@ del_mtx(ID mtxid)
 		 *  呼出し順・引数はFMP3の現物ini_mtx（mutex.c:605-614）に
 		 *  合わせている（MP版のmutex_drop_priorityはp_my_pcbが先頭）．
 		 *
-		 *  ★MTX_CEILING(p_mtxcb)はp_mtxcb->p_mtxinib->mtxatrを読むため，
-		 *    このブロックはmtxatrにTA_NOEXSを書く前に実行しなければ
-		 *    ならない．順序を入れ替えると優先度が復帰しない．
+		 *  ★MTX_CEILING(p_mtxcb)はmtxatrをMTXPROTO_MASK(0x03)でマスクした
+		 *    値の比較であり，TA_NOEXS(=-1)もマスク後はTA_CEILINGに一致して
+		 *    しまう．先にmtxatrへTA_NOEXSを書くと，非ceilingミューテックス
+		 *    まで含めてstaleなceilpriでmutex_drop_priority経路に入って
+		 *    しまうため，優先度復帰（ceiling判定を含む）をTA_NOEXS書込み
+		 *    より前に行う．
 		 */
 		p_loctsk = p_mtxcb->p_loctsk;
 		if (p_loctsk != NULL) {

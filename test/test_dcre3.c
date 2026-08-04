@@ -43,17 +43,17 @@
  *
  * 【テストの目的】
  *
- *	(A) acre_sem → sig/wai/pol の基本動作 → 休止資源での del_sem → E_NOEXS ×6
+ *	(A) acre_sem → sig/wai/pol の基本動作 → 休止資源での del_sem → E_NOEXS ×7
  *	(B) E_DLT 実証（同一プロセッサ）: 高優先度タスクを wai_sem で待たせ，
  *	    del_sem で E_DLT を受け取ることを check_ercd で確認
  *	(C) E_DLT 実証（別プロセッサ）: PRC2 のタスクを wai_sem で待たせ，
  *	    PRC1 から del_sem して E_DLT を受け取る（init_wait_queue の MP 経路）
  *	(D) スロット枯渇 E_NOID／静的オブジェクトへの del が E_OBJ／
  *	    パラメータ検査 E_PAR・E_RSATR／del → 再 acre で同一 ID（決定形）
- *	(E) flg: acre → set/clr/wai/pol/ini → del → E_NOEXS ×7，TA_CLR の実動作
+ *	(E) flg: acre → set/clr/wai/pol/ini → del → E_NOEXS ×8，TA_CLR の実動作
  *	(F) mtx: acre(TA_CEILING) → loc → 現在優先度が上限へ上がる →
  *	    ★ロック中の del_mtx が成功 → 現在優先度がベース優先度へ復帰することを
- *	    get_pri で実測 → 削除済みであること（E_NOEXS ×6）
+ *	    get_pri で実測 → 削除済みであること（E_NOEXS ×7）
  *	(G) mtx エラー系（不正 ceilpri で E_PAR，未定義属性ビットで E_RSATR）と
  *	    スロット再利用
  *

@@ -104,9 +104,12 @@ TFN_DEL_SEM(-210):147 / TFN_DEL_FLG(-211):148 / TFN_DEL_MTX(-215):151。
   ③ `remove_mutex(p_loctsk, p_mtxcb)`（②の後でも①のローカルは非 NULL なので安全）
   ④ ceiling mutex なら `mutex_drop_priority(p_my_pcb, p_loctsk, ...)` で優先度復帰
      （MP 版は p_my_pcb が先頭引数）
-  **重要**: `MTX_CEILING(p_mtxcb)` は `p_mtxcb->p_mtxinib->mtxatr` を読むため、
-  ④の優先度復帰を済ませてから `mtxatr = TA_NOEXS` を書くこと（順序を誤ると
-  ceiling の優先度が復帰しない）。
+  **重要**: `MTX_CEILING(p_mtxcb)` は `mtxatr` を `MTXPROTO_MASK(0x03)` で
+  マスクした値の比較であり、`TA_NOEXS`(=-1) もマスク後は `TA_CEILING` に
+  一致してしまう。先に `mtxatr = TA_NOEXS` を書くと、非 ceiling ミューテッ
+  クスまで stale な `ceilpri` で `mutex_drop_priority` 経路に入ってしまう
+  ため、④の優先度復帰（ceiling 判定を含む）を `mtxatr = TA_NOEXS` の書込み
+  より前に行う。
 - 待ち解除で起きたタスクの再スケジュールは init_wait_queue / make_non_wait が面倒を見る
   （既存機構）。del_* 側でディスパッチ判断が必要かは **訂正C**: 3つの `del_*` とも
   `CHECK_TSKCTX_UNL_MYSTATE(&p_selftsk)` を使う（ini_flg/ini_mtx に統一）（§8-3）。
@@ -182,8 +185,9 @@ TFN_DEL_SEM(-210):147 / TFN_DEL_FLG(-211):148 / TFN_DEL_MTX(-215):151。
 静的オブジェクト: `SEM1`・`FLG1`・`MTX1` 各1個。
 
 1. sem: acre → sig/wai の基本動作 → del（休止資源での削除）→ E_NOEXS
-2. **E_DLT 実証**: 低優先度タスクを wai_sem で待たせ、del_sem → 待ちタスクが E_DLT を
-   受け取ることを check_ercd で確認
+2. **E_DLT 実証**: HIGH 優先度タスク（PRC1 の TASK2／PRC2 の TASK3）を wai_sem で待たせ、
+   del_sem → 待ちタスクが E_DLT を受け取ることを check_ercd で確認（同一プロセッサ／
+   別プロセッサの両経路）
 3. 枯渇 E_NOID（sem 2個使用中に3個目）、静的 sem への del → E_OBJ
 4. flg: acre → set/wai → del、E_NOEXS
 5. mtx: acre(TA_CEILING) → loc → **ロック中 del_mtx 成功** → 所有タスクの現在優先度が
