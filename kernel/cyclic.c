@@ -318,6 +318,12 @@ del_cyc(ID cycid)
 
 		p_cycinib = (CYCINIB *)(p_cyccb->p_cycinib);
 		p_cycinib->cycatr = TA_NOEXS;
+		/*
+		 *  p_cyccb->p_pcbはfree-list滞在中staleなまま残るが，acre_cycが
+		 *  取り出し時に無条件で再設定する（get_pcb(TOPPERS_MASTER_PRCID)）
+		 *  ため支障はない．TA_NOEXS状態のCBのp_pcbを読む経路は存在しない
+		 *  ことがこの不変量の前提である（段階2最終レビュー triage ①）．
+		 */
 		queue_insert_prev(&free_cyccb, ((QUEUE *) &(p_cyccb->tmevtb)));
 		ercd = E_OK;
 	}

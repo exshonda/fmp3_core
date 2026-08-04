@@ -127,6 +127,16 @@ class KernelObject
     @inibList = { "#{@OBJ_S}INIB" => "a#{@obj_s}inib_table" }
   end
 
+  #
+  #  AID_xxxが1個以上ある構成に対するオブジェクト種別ごとの追加検査．
+  #
+  #  既定では何もしない．cyc/almだけが「マスタプロセッサが時間イベント
+  #  処理プロセッサであること」を要求するためオーバライドする（段階2
+  #  最終レビュー Minor 1 の hardening）．
+  #
+  def checkAutoObjid(numAutoObjid)
+  end
+
   def generate()
     # AID_xxxの処理（クラス外専用。ENA_SPRと同じ規約: kernel/task.trb:158-161）
     #
@@ -156,6 +166,11 @@ class KernelObject
         error_ercd("E_OBJ", params,
                    "#{@aidapi} requires at least one #{@api} in the system")
       end
+    end
+
+    # オブジェクト種別ごとの追加検査（既定はno-op）
+    if numAutoObjid > 0
+      checkAutoObjid(numAutoObjid)
     end
 
     # オブジェクトの数のマクロ定義の生成（kernel_cfg.h）

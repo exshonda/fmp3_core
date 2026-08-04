@@ -122,6 +122,15 @@ class KernelObject:
         self.aidapi = "AID_" + obj.upper()
         self.inibList = {f"{self.OBJ_S}INIB": f"a{self.obj_s}inib_table"}
 
+    def checkAutoObjid(self, numAutoObjid):
+        """AID_xxx が 1 個以上ある構成に対するオブジェクト種別ごとの追加検査．
+
+        既定では何もしない．cyc/alm だけが「マスタプロセッサが時間イベント
+        処理プロセッサであること」を要求するためオーバライドする
+        （段階2 最終レビュー Minor 1 の hardening）．
+        """
+        pass
+
     def generate(self):
         # AID_xxx の処理（クラス外専用。ENA_SPRと同じ規約: kernel/task.py:141-142）
         #
@@ -150,6 +159,10 @@ class KernelObject:
                 error_ercd("E_OBJ", params,
                            f"{self.aidapi} requires at least one "
                            f"{self.api} in the system")
+
+        # オブジェクト種別ごとの追加検査（既定は no-op）
+        if numAutoObjid > 0:
+            self.checkAutoObjid(numAutoObjid)
 
         # オブジェクトの数のマクロ定義の生成（kernel_cfg.h）
         kernelCfgH.add(f"#define TNUM_{self.OBJ}ID\t"
