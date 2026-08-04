@@ -23,3 +23,6 @@ AID_ALM .noalm
 AID_SEM .nosem
 AID_FLG .noflg
 AID_MTX .nomtx
+AID_DTQ .nodtq
+AID_PDQ .nopdq
+AID_MPF .nompf

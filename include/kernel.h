@@ -245,11 +245,25 @@ typedef struct t_rflg {
 	FLGPTN	flgptn;		/* イベントフラグの現在のビットパターン */
 } T_RFLG;
 
+typedef struct t_cdtq {
+	ATR		dtqatr;		/* データキュー属性 */
+	uint_t	dtqcnt;		/* データキュー管理領域に格納できるデータ数 */
+	void	*dtqmb;		/* データキュー管理領域の先頭番地 */
+} T_CDTQ;
+
 typedef struct t_rdtq {
 	ID		stskid;		/* データキューの送信待ち行列の先頭のタスクのID番号 */
 	ID		rtskid;		/* データキューの受信待ち行列の先頭のタスクのID番号 */
 	uint_t	sdtqcnt;	/* データキュー管理領域に格納されているデータの数 */
 } T_RDTQ;
+
+typedef struct t_cpdq {
+	ATR		pdqatr;		/* 優先度データキュー属性 */
+	uint_t	pdqcnt;		/* 優先度データキュー管理領域に格納できるデータ数 */
+	PRI		maxdpri;	/* 優先度データキューに送信できるデータ優先度の最
+						   大値 */
+	void	*pdqmb;		/* 優先度データキュー管理領域の先頭番地 */
+} T_CPDQ;
 
 typedef struct t_rpdq {
 	ID		stskid;		/* 優先度データキューの送信待ち行列の先頭のタスク
@@ -269,6 +283,14 @@ typedef struct t_rmtx {
 	ID		htskid;		/* ミューテックスをロックしているタスクのID番号 */
 	ID		wtskid;		/* ミューテックスの待ち行列の先頭のタスクのID番号 */
 } T_RMTX;
+
+typedef struct t_cmpf {
+	ATR		mpfatr;		/* 固定長メモリプール属性 */
+	uint_t	blkcnt;		/* 獲得できる固定長メモリブロックの数 */
+	uint_t	blksz;		/* 固定長メモリブロックのサイズ */
+	MPF_T	*mpf;		/* 固定長メモリプール領域の先頭番地 */
+	void	*mpfmb;		/* 固定長メモリプール管理領域の先頭番地 */
+} T_CMPF;
 
 typedef struct t_rmpf {
 	ID		wtskid;		/* 固定長メモリプールの待ち行列の先頭のタスクの
@@ -372,6 +394,8 @@ extern ER		twai_flg(ID flgid, FLGPTN waiptn,
 extern ER		ini_flg(ID flgid) throw();
 extern ER		ref_flg(ID flgid, T_RFLG *pk_rflg) throw();
 
+extern ER_ID	acre_dtq(const T_CDTQ *pk_cdtq) throw();
+extern ER		del_dtq(ID dtqid) throw();
 extern ER		snd_dtq(ID dtqid, intptr_t data) throw();
 extern ER		psnd_dtq(ID dtqid, intptr_t data) throw();
 extern ER		tsnd_dtq(ID dtqid, intptr_t data, TMO tmout) throw();
@@ -382,6 +406,8 @@ extern ER		trcv_dtq(ID dtqid, intptr_t *p_data, TMO tmout) throw();
 extern ER		ini_dtq(ID dtqid) throw();
 extern ER		ref_dtq(ID dtqid, T_RDTQ *pk_rdtq) throw();
 
+extern ER_ID	acre_pdq(const T_CPDQ *pk_cpdq) throw();
+extern ER		del_pdq(ID pdqid) throw();
 extern ER		snd_pdq(ID pdqid, intptr_t data, PRI datapri) throw();
 extern ER		psnd_pdq(ID pdqid, intptr_t data, PRI datapri) throw();
 extern ER		tsnd_pdq(ID pdqid, intptr_t data,
@@ -410,6 +436,8 @@ extern ER		ref_spn(ID spnid, T_RSPN *pk_rspn) throw();
 /*
  *  メモリプール管理機能
  */
+extern ER_ID	acre_mpf(const T_CMPF *pk_cmpf) throw();
+extern ER		del_mpf(ID mpfid) throw();
 extern ER		get_mpf(ID mpfid, void **p_blk) throw();
 extern ER		pget_mpf(ID mpfid, void **p_blk) throw();
 extern ER		tget_mpf(ID mpfid, void **p_blk, TMO tmout) throw();

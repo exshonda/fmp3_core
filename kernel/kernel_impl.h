@@ -202,6 +202,10 @@ typedef struct task_control_block TCB;
 #define TA_MEMALLOC		UINT_C(0x8000)		/* メモリ領域をカーネルで確保 */
 #endif /* TA_MEMALLOC */
 
+#ifndef TA_MBALLOC
+#define TA_MBALLOC		UINT_C(0x4000)		/* 管理領域をカーネルで確保 */
+#endif /* TA_MBALLOC */
+
 #ifndef TARGET_TSKATR
 #define TARGET_TSKATR		0U		/* ターゲット定義のタスク属性 */
 #endif /* TARGET_TSKATR */
