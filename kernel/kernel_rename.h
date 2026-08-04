@@ -115,6 +115,9 @@
 #define dequeue_pridata				_kernel_dequeue_pridata
 #define send_pridata				_kernel_send_pridata
 #define receive_pridata				_kernel_receive_pridata
+#define free_pdqcb					_kernel_free_pdqcb
+#define tmax_spdqid					_kernel_tmax_spdqid
+#define apdqinib_table				_kernel_apdqinib_table
 
 /*
  *  mutex.c

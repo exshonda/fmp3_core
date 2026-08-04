@@ -116,6 +116,9 @@
 #undef dequeue_pridata
 #undef send_pridata
 #undef receive_pridata
+#undef free_pdqcb
+#undef tmax_spdqid
+#undef apdqinib_table
 
 /*
  *  mutex.c

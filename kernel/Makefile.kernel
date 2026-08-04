@@ -95,6 +95,7 @@ dataqueue = dtqini.o dtqenq.o dtqfenq.o dtqdeq.o dtqsnd.o dtqfsnd.o dtqrcv.o \
 		rcv_dtq.o prcv_dtq.o trcv_dtq.o ini_dtq.o ref_dtq.o
 
 pridataq = pdqini.o pdqenq.o pdqdeq.o pdqsnd.o pdqrcv.o \
+		acre_pdq.o del_pdq.o \
 		snd_pdq.o psnd_pdq.o tsnd_pdq.o \
 		rcv_pdq.o prcv_pdq.o trcv_pdq.o ini_pdq.o ref_pdq.o
 

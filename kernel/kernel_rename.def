@@ -92,6 +92,9 @@ enqueue_pridata
 dequeue_pridata
 send_pridata
 receive_pridata
+free_pdqcb
+tmax_spdqid
+apdqinib_table
 
 # mutex.c
 initialize_mutex

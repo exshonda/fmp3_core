@@ -181,6 +181,8 @@
 #define TOPPERS_pdqdeq
 #define TOPPERS_pdqsnd
 #define TOPPERS_pdqrcv
+#define TOPPERS_acre_pdq
+#define TOPPERS_del_pdq
 #define TOPPERS_snd_pdq
 #define TOPPERS_psnd_pdq
 #define TOPPERS_tsnd_pdq

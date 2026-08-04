@@ -70,6 +70,11 @@
 #define VALID_TPRI(tpri)	(TMIN_TPRI <= (tpri) && (tpri) <= TMAX_TPRI)
 
 /*
+ *  データ優先度の範囲の判定
+ */
+#define VALID_DPRI(dpri)	(TMIN_DPRI <= (dpri) && (dpri) <= TMAX_DPRI)
+
+/*
  *  相対時間の範囲の判定
  */
 #define VALID_RELTIM(reltim)	((reltim) <= TMAX_RELTIM)
