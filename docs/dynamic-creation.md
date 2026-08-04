@@ -651,3 +651,47 @@ bss は Task 3 完了時点（`ISRCB`/`free_isrcb` 等のデータ構造確定�
 - 実装記録：`.superpowers/sdd/progress.md`（段階1〜3b），
   `.superpowers/sdd/2026-08-04-fmp3-dcre-isr/progress.md`（ISR 段階）
 - テスト本体：`test/test_dcre{1,2,3,4,5}.{c,cfg,h}`，`test/test_dcre_mix.{c,cfg,h}`
+
+## 11. 移植者向け: arch 層の要件
+
+動的生成 API を新しい arch/target へ持ち込む際に arch 層が用意すべきものの全リスト
+（esp32_s3 移植側からの照会 R-1 を受けて恒久化。詳細は `docs/qa-esp32s3-20260804.md`）。
+
+### 11.1 必須（該当 arch のみ）
+
+- **`USE_TSKINICTXB` を定義する arch**（arm_m・Xtensa 等）は次の2つを
+  `core_kernel_impl.h` に用意する（未定義だと `kernel/task_manage.c` の
+  acre_tsk/del_tsk がコンパイルエラーになる）:
+
+```c
+Inline void init_tskinictxb(TSKINICTXB *p_tskinictxb, size_t stksz, STK_T *stk);
+    /* 規約: stk_top = stk（先頭番地）／ stk_bottom = stk + stksz（末尾番地）。
+       stksz は呼出し側で ROUND_STK_T 済み。静的生成（cfg の TINIB 初期化子）と
+       同一規約であること（arm_m 実装 core_kernel_impl.h を参照） */
+Inline void *tskinictxb_memalloc_ptr(TSKINICTXB *p_tskinictxb);
+    /* TA_MEMALLOC で確保したスタックの先頭番地（free_mpk へ渡す値）を返す */
+```
+
+- `USE_TSKINICTXB` を使わない arch（TINIB が stksz/stk を直接持つ riscv 等）は**不要**。
+
+### 11.2 新規要求なし（確認のみ）
+
+- **sem/flg/mtx/dtq/pdq/mpf**: arch 依存関数の新規要求なし。
+- **cyc/alm**: 既存の `TOPPERS_TEPP_PRC`（target_kernel.h）を参照するのみ。
+- **ISR（ENA_DYNISR）**: 新規関数なし。既存の `INT_ENTRY`/`INTHDR_ENTRY` マクロ経由。
+  **`_kernel_inthdr_N` のシグネチャは queue-mode でも `void(void)` を維持**し、
+  `INTINIB`（5要素）/`INHINIB`（4要素）の構造・生成は不変（変更時は事前通知する）。
+
+### 11.3 フォールバック（arch 定義が優先・未定義でも動く）
+
+- `TARGET_TSKATR`・`TARGET_MIN_STKSZ`（`kernel/kernel_impl.h` の `#ifndef` 既定）
+- `CHECK_*_ALIGN` / `CHECK_FUNC_NONNULL` / `CHECK_MPK_ALIGN` 等
+  （`kernel/check.h` — 未定義なら該当検査は恒真に落ちる。厳密化したい arch は定義する）
+
+### 11.4 pin 更新時に生成物へ現れる恒常出力
+
+AID 系 API の登録により、**動的 API を使わない構成でも** kernel_cfg.c に
+`_kernel_` 帰属の追加シンボル（TNUM_S*ID 系・EMPTY_LABEL 群・mpk 系・
+CRE_ISR を持つ構成では ISRINIB/ISRCB 系）が恒常出力される（設計裁定 —
+各 spec の「管理された差分」参照）。ディスパッチコードと実行時挙動は不変。
+実測 ROM 影響（musca_b1 sample1）: text +1796 / data +0 / bss +72 バイト。
