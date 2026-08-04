@@ -165,6 +165,24 @@ acre_tsk(const T_CTSK *pk_ctsk)
 	CHECK_PAR(FUNC_NONNULL(task));
 	CHECK_PAR(VALID_TPRI(itskpri));
 	CHECK_PAR(stksz >= TARGET_MIN_STKSZ);
+
+	/*
+	 *  スタックサイズの丸めがあふれないこと
+	 *
+	 *  ★dcre（extension/dcre/kernel/task_manage.c）にこの検査は無い．
+	 *  acre_tskには乗算が無いのでacre_dtq/acre_pdq/acre_mpfとは事情が
+	 *  違うが，下のROUND_STK_T(stksz)（＝(stksz + sizeof(STK_T) - 1) &
+	 *  ~(sizeof(STK_T) - 1)）の加算はあふれうる．stkszはsize_tなので，
+	 *  32bit/64bitのどちらでも到達可能である．あふれると丸め結果が0付近
+	 *  へ落ち，aligned_alloc_mpkが「成功」してゼロ長スタックのタスクが
+	 *  できあがる（init_tskinictxbはstk+stkszをスタック底に使う）．
+	 *
+	 *  ★stk != NULL（ユーザ供給）の場合はROUND_STK_Tを通らないが，
+	 *  検査を条件つきにする理由が無い（あふれるstkszはいずれにせよ
+	 *  正当な入力ではない）ので無条件に置く．
+	 */
+	CHECK_PAR(stksz <= (SIZE_MAX - (sizeof(STK_T) - 1)));
+
 	if (stk != NULL) {
 		CHECK_PAR(STKSZ_ALIGN(stksz));
 		CHECK_PAR(STACK_ALIGN(stk));

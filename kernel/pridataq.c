@@ -340,6 +340,17 @@ acre_pdq(const T_CPDQ *pk_cpdq)
 
 	CHECK_VALIDATR(pdqatr, TA_TPRI);
 	CHECK_PAR(VALID_DPRI(maxdpri));
+
+	/*
+	 *  管理領域のサイズ計算があふれないこと
+	 *
+	 *  ★dcreにこの検査は無い．根拠はacre_dtqの同じ検査と同一である
+	 *  （pdqcntはuint_t，sizeof(PDQMB)はsize_t．32bitターゲットで積が
+	 *  あふれると，pdqcnt個のPDQMBが入らない領域の確保に成功してしまい，
+	 *  enqueue_pridataのunusedインデックス越しにプール外を破壊する）．
+	 */
+	CHECK_PAR(pdqcnt <= (SIZE_MAX / sizeof(PDQMB)));
+
 	if (p_pdqmb != NULL) {
 		CHECK_PAR(MB_ALIGN(p_pdqmb));
 	}

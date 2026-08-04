@@ -360,6 +360,24 @@ acre_dtq(const T_CDTQ *pk_cdtq)
 	p_dtqmb = pk_cdtq->dtqmb;
 
 	CHECK_VALIDATR(dtqatr, TA_TPRI);
+
+	/*
+	 *  管理領域のサイズ計算があふれないこと
+	 *
+	 *  ★dcre（extension/dcre/kernel/dataqueue.c）にこの検査は無い．
+	 *  dtqcntはuint_t（unsigned int），sizeof(DTQMB)はsize_tである．
+	 *  size_tとunsigned intが同幅のターゲット（32bit）では，両者の積が
+	 *  size_tの中であふれ，要求よりはるかに小さい領域の確保に成功して
+	 *  しまう（その領域にdtqcnt個のDTQMBは入らない）．enqueue_dataは
+	 *  p_dtqinib->dtqcntを信じてp_dtqmb[tail]へ書くので，プール外破壊に
+	 *  なる．64bitターゲットではuint_tの最大値でも積があふれないため，
+	 *  この検査は恒真に落ちる（無害）．
+	 *
+	 *  検査はロック取得前に置く．引数だけから決まりコア非依存である
+	 *  （既存のCHECK_VALIDATR/MB_ALIGNと同じ位置づけ）．
+	 */
+	CHECK_PAR(dtqcnt <= (SIZE_MAX / sizeof(DTQMB)));
+
 	if (p_dtqmb != NULL) {
 		CHECK_PAR(MB_ALIGN(p_dtqmb));
 	}

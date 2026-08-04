@@ -467,44 +467,84 @@ initialize_mempool(MB_T *mempool, size_t size)
 	}
 }
 
+/*
+ *  メモリプール領域からの割当て（malloc_mempool / aligned_alloc_mempool の共通部）
+ *
+ *  ★dcreからの意図的な逸脱：符号混在比較とあふれの安全化（上流報告候補c）
+ *
+ *  dcre（extension/dcre/kernel/startup.c）の原形は
+ *
+ *      brk = align_pointer(p_mempoolcb->brk, alignment);
+ *      if (((char *)(p_mempoolcb->limit)) - ((char *) brk) >= size) { … }
+ *
+ *  であり，2つの欠陥がある．
+ *
+ *  (1) 左辺のポインタ差はptrdiff_t（符号つき），右辺のsizeはsize_t（符号
+ *      なし）である．通常の算術変換により左辺が符号なしへ変換されるので，
+ *      アラインメント調整でbrkがlimitを越えた場合（差が負）に，その負の値が
+ *      巨大な符号なし値になり，比較が真＝「入る」と誤判定する．その結果，
+ *      メモリプール領域の外側の番地を成功として返す．
+ *  (2) align_pointerの加算 ((uintptr_t) ptr + alignment - 1) 自体があふれ
+ *      うる．あふれるとbrkが小さな値へ巻き戻り，(1)と同じ誤判定を招く．
+ *
+ *  そこで本実装は，すべての算術を符号なし（uintptr_t）で行い，
+ *
+ *      ・調整の加算があふれないこと
+ *      ・調整後のbrkがlimitを越えていないこと
+ *
+ *  をこの順に確かめてから初めて残量（limit - aligned）を計算する．負の差が
+ *  生じうる箇所が式の上に存在しないため，(1)の誤判定は構造的に起こらない．
+ *
+ *  ★この修正だけでは穴は塞がらない．呼出し側（acre_dtq/acre_pdq/acre_mpf/
+ *  acre_tsk）が渡すsize自体が乗算・丸めであふれていると，「小さくなったsize」
+ *  は正当に「入る」と判定されて成功してしまう．両者は同じ穴の両端であり，
+ *  一体で修正している（各acre_*のCHECK_PARを参照）．
+ *
+ *  alignmentは2の巾乗であること（呼出し側の責任．alignof(MB_T)ないし
+ *  aligned_alloc_mpkの引数）．
+ */
 Inline void *
-align_pointer(void *ptr, size_t alignment)
+alloc_mempool(MEMPOOLCB *p_mempoolcb, size_t alignment, size_t size)
 {
-	return((void *)((((uintptr_t) ptr) + alignment - 1) & ~(alignment - 1)));
+	uintptr_t	brk = ((uintptr_t)(p_mempoolcb->brk));
+	uintptr_t	limit = ((uintptr_t)(p_mempoolcb->limit));
+	uintptr_t	adjust = (((uintptr_t) alignment) - 1U);
+	uintptr_t	aligned;
+
+	/*
+	 *  アラインメント調整の加算があふれる場合は割り当てられない．
+	 */
+	if (brk > ((~((uintptr_t) 0U)) - adjust)) {
+		return(NULL);
+	}
+	aligned = ((brk + adjust) & ~adjust);
+
+	/*
+	 *  調整の結果が上限を越えた場合は割り当てられない．
+	 *  ★この検査を済ませるまで limit - aligned を計算してはならない．
+	 */
+	if (aligned > limit) {
+		return(NULL);
+	}
+	if (((uintptr_t) size) > (limit - aligned)) {
+		return(NULL);
+	}
+
+	p_mempoolcb->brk = ((void *)(aligned + ((uintptr_t) size)));
+	p_mempoolcb->count += 1;
+	return(((void *) aligned));
 }
 
 void *
 malloc_mempool(MB_T *mempool, size_t size)
 {
-	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
-	void		*brk;
-
-	brk = align_pointer(((MEMPOOLCB *) mempool)->brk, alignof(MB_T));
-	if (((char *)(p_mempoolcb->limit)) - ((char *) brk) >= size) {
-		p_mempoolcb->brk = ((char *) brk) + size;
-		p_mempoolcb->count += 1;
-		return(brk);
-	}
-	else {
-		return(NULL);
-	}
+	return(alloc_mempool(((MEMPOOLCB *) mempool), alignof(MB_T), size));
 }
 
 void *
 aligned_alloc_mempool(MB_T *mempool, size_t alignment, size_t size)
 {
-	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
-	void		*brk;
-
-	brk = align_pointer(((MEMPOOLCB *) mempool)->brk, alignment);
-	if (((char *)(p_mempoolcb->limit)) - ((char *) brk) >= size) {
-		p_mempoolcb->brk = ((char *) brk) + size;
-		p_mempoolcb->count += 1;
-		return(brk);
-	}
-	else {
-		return(NULL);
-	}
+	return(alloc_mempool(((MEMPOOLCB *) mempool), alignment, size));
 }
 
 void

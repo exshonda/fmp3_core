@@ -226,6 +226,36 @@ acre_mpf(const T_CMPF *pk_cmpf)
 	CHECK_VALIDATR(mpfatr, TA_TPRI);
 	CHECK_PAR(blkcnt != 0);
 	CHECK_PAR(blksz != 0);
+
+	/*
+	 *  ブロック領域と管理領域のサイズ計算があふれないこと（3件）
+	 *
+	 *  ★dcre（extension/dcre/kernel/mempfix.c）にこれらの検査は無い．
+	 *  acre_mpfは2段確保（①ブロック領域 ②管理領域）であり，あふれうる
+	 *  箇所が3つある．
+	 *
+	 *  (a) ROUND_MPF_T(blksz) の丸めそのもの
+	 *      TOPPERS_ROUND_SZ(sz, unit) は ((sz) + (unit) - 1) & ~((unit) - 1)
+	 *      であり，blkszがsize_tの最大値に近いと加算があふれて丸め結果が
+	 *      0（またはblkszより小さい値）になる．結果，malloc_mpk(0)が成功し，
+	 *      p_mpfinib->blkszに0が入った固定長メモリプールができあがる．
+	 *      get_mpfは同じ番地を何度も配ることになる．
+	 *  (b) ROUND_MPF_T(blksz) * blkcnt（①ブロック領域）
+	 *  (c) sizeof(MPFMB) * blkcnt（②管理領域）
+	 *      いずれもacre_dtqと同じ理由（32bitで積があふれる）．
+	 *      ②があふれた場合は①の巻き戻し経路（下の pk_cmpf->mpf 判定）を
+	 *      通るが，そもそも「小さすぎる管理領域の確保に成功する」ので
+	 *      巻き戻しは起こらず，MPFMB配列の外を触るプールが生まれる．
+	 *
+	 *  (a)を先に置くのは，(b)の除数 ROUND_MPF_T(blksz) が壊れていない
+	 *  ことを(b)より前に保証するためである．blksz != 0 は直前で検査済み
+	 *  なので，(a)を通れば ROUND_MPF_T(blksz) >= sizeof(MPF_T) > 0 であり，
+	 *  (b)の除算は0除算にならない．
+	 */
+	CHECK_PAR(blksz <= (SIZE_MAX - (sizeof(MPF_T) - 1)));
+	CHECK_PAR(blkcnt <= (SIZE_MAX / ROUND_MPF_T(blksz)));
+	CHECK_PAR(blkcnt <= (SIZE_MAX / sizeof(MPFMB)));
+
 	if (mpf != NULL) {
 		CHECK_PAR(MPF_ALIGN(mpf));
 	}

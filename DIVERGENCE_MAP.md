@@ -170,6 +170,11 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | test/test_dcre_mix_ma.h（ISR最終レビュー Important #3 対応） | add (dcre-port) | 上記のヘッダ（`task1`/`ma_isr1` のプロトタイプ）。`test_dcre_mix.h` と同型 | - |
 | test/MANIFEST（ISR最終レビュー Important #3 対応） | mod (dcre-port) | `test_dcre_mix.h` の後・`test_dlynse.c` の前（アルファベット順、`.` (0x2E) < `_` (0x5F) のため `test_dcre_mix.h` < `test_dcre_mix_ma.c`）に `test_dcre_mix_ma.c`/`test_dcre_mix_ma.cfg`/`test_dcre_mix_ma.h` の3行を追加 | - |
 | test/testexec.rb（ISR最終レビュー Important #3 対応） | mod (dcre-port) | `"dcremix" => { SRC: "test_dcre_mix" },` の後・`"dlynse"` の前に `"dcremixma" => { SRC: "test_dcre_mix_ma" },` を追加 | - |
+| kernel/startup.c（hardening） | mod (dcre-port) | `align_pointer`（旧 `:470-474`）を廃止し、`malloc_mempool`/`aligned_alloc_mempool` を共通の `alloc_mempool`（`uintptr_t` 算術）へ再構成した。**dcre 原形の `((char *) limit) - ((char *) brk) >= size` は `ptrdiff_t` と `size_t` の混在比較**で、アラインメント調整が `limit` を越えた場合に負のポインタ差が巨大な符号なし値へ変換され、プール外の番地を成功として返す（**上流報告候補 c の現物**）。あわせて `align_pointer` の加算あふれも塞いだ。★これは dcre からの**意図的な逸脱**であり、上流の欠陥の修正である。呼出し側（`acre_*`）のサイズ検査と**一体で**入れている（片方だけでは穴が残る — 段階3b 最終レビューの裁定）。dcre（`extension/dcre/kernel/startup.c:238-278`）と現物比較のうえ同一の欠陥を確認済み（本ブランチ固有の劣化ではない） | **要**（候補 c を「観察」から「修正済み・要報告」へ格上げ） |
+| kernel/dataqueue.c（hardening） | mod (dcre-port) | `acre_dtq` に `CHECK_PAR(dtqcnt <= (SIZE_MAX / sizeof(DTQMB)));` を追加（H-1）。★dcre（`extension/dcre/kernel/dataqueue.c`）にこの検査は無い。`dtqcnt`（`uint_t`）と `sizeof(DTQMB)`（`size_t`）の積が32bitターゲットであふれると、`dtqcnt` 個の `DTQMB` が入らない領域の確保に成功してしまい `enqueue_data` がプール外を破壊する。64bitターゲットでは積があふれないため検査は恒真（無害） | - |
+| kernel/pridataq.c（hardening） | mod (dcre-port) | `acre_pdq` に `CHECK_PAR(pdqcnt <= (SIZE_MAX / sizeof(PDQMB)));` を追加（H-2）。★dcre にこの検査は無い。根拠は `acre_dtq` の同じ検査と同一（`pdqcnt`×`sizeof(PDQMB)` の32bitあふれ→`enqueue_pridata` のプール外破壊） | - |
+| kernel/mempfix.c（hardening） | mod (dcre-port) | `acre_mpf` に3本の `CHECK_PAR` を追加（H-3）：(a) `blksz <= SIZE_MAX - (sizeof(MPF_T) - 1)`（`ROUND_MPF_T(blksz)` の丸め加算あふれ防止）、(b) `blkcnt <= SIZE_MAX / ROUND_MPF_T(blksz)`（ブロック領域確保の積あふれ）、(c) `blkcnt <= SIZE_MAX / sizeof(MPFMB)`（管理領域確保の積あふれ）。★dcre（`extension/dcre/kernel/mempfix.c`）にこれらの検査は無い。(a)を(b)より先に置くのは、(b)の除数が0にならないことを保証するため（`blksz != 0` は直前で検査済み） | - |
+| kernel/task_manage.c（hardening） | mod (dcre-port) | `acre_tsk` に `CHECK_PAR(stksz <= (SIZE_MAX - (sizeof(STK_T) - 1)));` を追加（H-4）。★dcre（`extension/dcre/kernel/task_manage.c`）にこの検査は無い。`acre_tsk` には乗算は無いが `ROUND_STK_T(stksz)` の丸め加算は32bit/64bitどちらでもあふれうる（`stksz` は `size_t`）。あふれると丸め結果が0付近へ落ち、`aligned_alloc_mpk` が「成功」してゼロ長スタックのタスクができる | - |
 
 **★恒常出力の受容（ISR段階 Task 2、訂正D）**：ISR にはランタイムオブジェクトが
 無かったため、`AID_ISR` を `kernel_api.def` に登録した時点で（`cfgData` が登録済み
@@ -287,8 +292,9 @@ Task 4/5 は関数本体のみを追加したため、という理解と整合�
   `-Os`/`-O0` 等に上書きしたいターゲットを追加すると、上流と違って上書きできない
   （常に `-O2` に戻される）ことになる。対処は本レビュー対応のスコープ外と判断し記録に留める。
 
-- **（2026-08-04 dcre段階3b Task 7 追記）`acre_dtq`/`acre_pdq`/`acre_mpf` は乗算の桁あふれを
-  検査しない（dcre 由来・未 hardening）。** `acre_dtq`/`acre_pdq` は管理領域サイズ
+- **（2026-08-04 dcre段階3b Task 7 追記／2026-08-04 hardening Task 1 で解消済み）
+  `acre_dtq`/`acre_pdq`/`acre_mpf` は乗算の桁あふれを検査しない（dcre 由来・未 hardening）。**
+  `acre_dtq`/`acre_pdq` は管理領域サイズ
   `sizeof(DTQMB) * dtqcnt` / `sizeof(PDQMB) * pdqcnt` を、`acre_mpf` はブロック領域サイズ
   `ROUND_MPF_T(blksz) * blkcnt` を、いずれも `dtqcnt`/`pdqcnt`/`blkcnt`/`blksz` の上限検査を
   行わずに `malloc_mpk` へ渡す（`kernel/dataqueue.c`・`kernel/pridataq.c`・`kernel/mempfix.c`、
@@ -300,6 +306,14 @@ Task 4/5 は関数本体のみを追加したため、という理解と整合�
   （`mact_tsk`/`mig_tsk` のロック前 `p_tinib` 読み）・段階3a `acre_mtx` の未検査 `ceilpri` と
   同系統の「ユーザ誤用経路の hardening」課題として引き継ぐ。**段階3b では到達可能性の実証も
   修正も行っていない。**
+  ★**hardening パス Task 1（2026-08-04）でこのオーバーフロー未検査（H-1〜H-3、`acre_dtq`/
+  `acre_pdq`/`acre_mpf`）と、上で述べた `malloc_mempool` の符号混在比較（H-5）を**一体で**
+  修正した。**片方だけ直すと穴が残る**（サイズ検査だけならアラインメント調整で `brk` が
+  `limit` を越えたときの符号なし化誤判定が残り、符号比較だけならオーバーフローで小さくなった
+  `size` が正当に「入る」と判定されて成功してしまう）ため、同一コミットで両方を直した。
+  あわせて `acre_tsk` の `ROUND_STK_T(stksz)` 丸めあふれ（H-4。乗算ではなく丸め加算だが同系統の
+  危険）にも検査を追加した。詳細は本表末尾の H-1〜H-5 の行を参照。この事項は解消済みであり、
+  引き継ぐ「未 hardening」課題ではなくなった
 
 - **（2026-08-04 ISR段階 Task 7 追記）`kernel/interrupt.trb:338-346`（Python 側は
   `interrupt.py` の対応行）の `isrorder_table` 生成には、他の表（`isrinib_table`／
@@ -329,7 +343,8 @@ Task 4/5 は関数本体のみを追加したため、という理解と整合�
   未 hardening ではなく設計上の意図的帰結であり、対処はスコープ外。
 
 - **（2026-08-04 ISR段階 Task 7・上流報告候補の最終確認）上流報告候補は 4 件
-  （a=段階1、b=解消済み・未報告、c=`malloc_mempool` の符号混在比較、d=`del_flg`/
+  （a=段階1、b=解消済み・未報告、c=`malloc_mempool` の符号混在比較（**本ブランチでは
+  hardening パス Task 1（2026-08-04）で修正済み。上流へは未報告**）、d=`del_flg`/
   `del_dtq` の `CHECK_PAR`→`CHECK_ID` 不整合2件）のまま、ISR 段階では増えていない。**
   ISR 段階で `del_isr` が候補 d と同型（`CHECK_PAR` の使用）になっていないかを確認した
   結果、`del_isr` は dcre 自身が `CHECK_ID`（E_ID）であり（本表 `kernel/interrupt.c
