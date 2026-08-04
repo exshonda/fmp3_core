@@ -20,3 +20,6 @@ AID_TSK .notsk
 DEF_MPK { .mpksz &mpk? }
 AID_CYC .nocyc
 AID_ALM .noalm
+AID_SEM .nosem
+AID_FLG .noflg
+AID_MTX .nomtx

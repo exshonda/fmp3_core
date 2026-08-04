@@ -224,10 +224,21 @@ typedef struct t_rtsk {
 	ID		actprc;		/* 次の起動時の割付けプロセッサのID */
 } T_RTSK;
 
+typedef struct t_csem {
+	ATR			sematr;		/* セマフォ属性 */
+	uint_t		isemcnt;	/* セマフォの初期資源数 */
+	uint_t		maxsem;		/* セマフォの最大資源数 */
+} T_CSEM;
+
 typedef struct t_rsem {
 	ID		wtskid;		/* セマフォの待ち行列の先頭のタスクのID番号 */
 	uint_t	semcnt;		/* セマフォの現在の資源数 */
 } T_RSEM;
+
+typedef struct t_cflg {
+	ATR			flgatr;		/* イベントフラグ属性 */
+	FLGPTN		iflgptn;	/* イベントフラグの初期ビットパターン */
+} T_CFLG;
 
 typedef struct t_rflg {
 	ID		wtskid;		/* イベントフラグの待ち行列の先頭のタスクのID番号 */
@@ -248,6 +259,11 @@ typedef struct t_rpdq {
 	uint_t	spdqcnt;	/* 優先度データキュー管理領域に格納されているデー
 						   タの数 */
 } T_RPDQ;
+
+typedef struct t_cmtx {
+	ATR			mtxatr;		/* ミューテックス属性 */
+	PRI			ceilpri;	/* ミューテックスの上限優先度 */
+} T_CMTX;
 
 typedef struct t_rmtx {
 	ID		htskid;		/* ミューテックスをロックしているタスクのID番号 */
@@ -334,6 +350,8 @@ extern ER		ter_tsk(ID tskid) throw();
 /*
  *  同期・通信機能
  */
+extern ER_ID	acre_sem(const T_CSEM *pk_csem) throw();
+extern ER		del_sem(ID semid) throw();
 extern ER		sig_sem(ID semid) throw();
 extern ER		wai_sem(ID semid) throw();
 extern ER		pol_sem(ID semid) throw();
@@ -341,6 +359,8 @@ extern ER		twai_sem(ID semid, TMO tmout) throw();
 extern ER		ini_sem(ID semid) throw();
 extern ER		ref_sem(ID semid, T_RSEM *pk_rsem) throw();
 
+extern ER_ID	acre_flg(const T_CFLG *pk_cflg) throw();
+extern ER		del_flg(ID flgid) throw();
 extern ER		set_flg(ID flgid, FLGPTN setptn) throw();
 extern ER		clr_flg(ID flgid, FLGPTN clrptn) throw();
 extern ER		wai_flg(ID flgid, FLGPTN waiptn,
@@ -373,6 +393,8 @@ extern ER		trcv_pdq(ID pdqid, intptr_t *p_data,
 extern ER		ini_pdq(ID pdqid) throw();
 extern ER		ref_pdq(ID pdqid, T_RPDQ *pk_rpdq) throw();
 
+extern ER_ID	acre_mtx(const T_CMTX *pk_cmtx) throw();
+extern ER		del_mtx(ID mtxid) throw();
 extern ER		loc_mtx(ID mtxid) throw();
 extern ER		ploc_mtx(ID mtxid) throw();
 extern ER		tloc_mtx(ID mtxid, TMO tmout) throw();
