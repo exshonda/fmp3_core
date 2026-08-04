@@ -371,12 +371,16 @@ task1(EXINF exinf)
 	 *  ※本 control（negative control 2）が検証するのは「同一 isrpri の順序が
 	 *    isrseq タイブレークに依存すること」であり，enqueue_isr の単調カウンタ化
 	 *    （Task 5 のリセット撤去）が直した「走査中の完全ドレイン→enqueue で
-	 *    新エントリが取りこぼされない」性質は検証していない．本テストの INTNO1
-	 *    キューは静的 ISR_S4/ISR_S2 が常駐し，走査中に完全に空にはならないため
-	 *    （手順4のハンドシェイクでも enqueue 時点で A/C/S4 が残存），旧リセット
-	 *    挙動（キューが空になったときだけ isrseq を 0 へ戻す）でも本テストは
-	 *    通ってしまう．当該性質（完全ドレイン後の enqueue が走査中の cur に
-	 *    負けない）の回帰テストはスイート内に未整備 — hardening pass の課題．
+	 *    cur 以降の isrpri 位置に入る新エントリが取りこぼされない」性質は
+	 *    検証していない（★この性質は isrpri >= cur の位置に限る保証であり，
+	 *    cur より高優先な新エントリはそもそも同一起動では拾われない仕様——
+	 *    interrupt.c の enqueue_isr コメント／spec 訂正G追記を参照）．本テストの
+	 *    INTNO1 キューは静的 ISR_S4/ISR_S2 が常駐し，走査中に完全に空には
+	 *    ならないため（手順4のハンドシェイクでも enqueue 時点で A/C/S4 が
+	 *    残存），旧リセット挙動（キューが空になったときだけ isrseq を 0 へ
+	 *    戻す）でも本テストは通ってしまう．当該性質（完全ドレイン後の
+	 *    cur 以降位置への enqueue が走査中の cur に負けない）の回帰テストは
+	 *    スイート内に未整備 — hardening pass の課題．
 	 */
 	cisr.isrpri = 3;
 	cisr.exinf = (EXINF) 'A';	erid = acre_isr(&cisr);	check_assert(erid > ISR_S4);
