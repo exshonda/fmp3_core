@@ -192,6 +192,7 @@ typedef struct task_control_block TCB;
 #define TMIN_CYCID		1		/* 周期通知IDの最小値 */
 #define TMIN_ALMID		1		/* アラーム通知IDの最小値 */
 #define TMIN_SPNID		1		/* スピンロックIDの最小値 */
+#define TMIN_ISRID		1		/* 割込みサービスルーチンIDの最小値 */
 
 /*
  *  カーネル内部で使用する属性の定義
@@ -209,6 +210,10 @@ typedef struct task_control_block TCB;
 #ifndef TARGET_TSKATR
 #define TARGET_TSKATR		0U		/* ターゲット定義のタスク属性 */
 #endif /* TARGET_TSKATR */
+
+#ifndef TARGET_ISRATR
+#define TARGET_ISRATR		0U		/* ターゲット定義のISR属性 */
+#endif /* TARGET_ISRATR */
 
 #ifndef TARGET_MIN_STKSZ			/* タスクのスタックサイズの最小値 */
 #define TARGET_MIN_STKSZ	1U		/* 未定義の場合は0でないことをチェック */

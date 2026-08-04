@@ -18,3 +18,8 @@
 #ifndef TOPPERS_MACRO_ONLY
 extern void	task1(EXINF exinf);
 #endif /* TOPPERS_MACRO_ONLY */
+
+/*  混在構成に載せる静的ISRとENA_DYNISRの対象（INTNO1はtarget_test.hが定義）  */
+#ifndef TOPPERS_MACRO_ONLY
+extern void	mix_isr1(EXINF exinf);
+#endif /* TOPPERS_MACRO_ONLY */

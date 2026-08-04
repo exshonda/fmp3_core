@@ -327,6 +327,14 @@ typedef struct t_rspn {
 	STAT	spnstat;	/* スピンロックのロック状態 */
 } T_RSPN;
 
+typedef struct t_cisr {
+	ATR			isratr;		/* 割込みサービスルーチン属性 */
+	EXINF		exinf;		/* 割込みサービスルーチンの拡張情報 */
+	INTNO		intno;		/* 割込みサービスルーチンを登録する割込み番号 */
+	ISR			isr;		/* 割込みサービスルーチンの先頭番地 */
+	PRI			isrpri;		/* 割込みサービスルーチン優先度 */
+} T_CISR;
+
 /*
  *  サービスコールの宣言
  */
@@ -492,6 +500,8 @@ extern ER		ext_ker(void) throw();
 /*
  *  割込み管理機能
  */
+extern ER_ID	acre_isr(const T_CISR *pk_cisr) throw();
+extern ER		del_isr(ID isrid) throw();
 extern ER		dis_int(INTNO intno) throw();
 extern ER		ena_int(INTNO intno) throw();
 extern ER		clr_int(INTNO intno) throw();

@@ -26,3 +26,5 @@ AID_MTX .nomtx
 AID_DTQ .nodtq
 AID_PDQ .nopdq
 AID_MPF .nompf
+AID_ISR .noisr
+ENA_DYNISR .intno*

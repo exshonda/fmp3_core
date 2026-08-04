@@ -65,3 +65,14 @@ task1(EXINF exinf)
 	test_start(__FILE__);
 	check_finish(1);
 }
+
+/*
+ *  混在構成のリンク検査用の割込みサービスルーチン
+ *
+ *  本テストはビルドと等価性検査のみで実行しない（DIVERGENCE_MAP 記載）ため，
+ *  中身は空でよい．
+ */
+void
+mix_isr1(EXINF exinf)
+{
+}
