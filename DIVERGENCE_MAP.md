@@ -191,6 +191,17 @@ ISRINIB 表・ISRCB 実体・`p_isrcb_table`・`isrorder_table`・`tmax_isrid`/`
 `initialize_isr`/`enqueue_isr`/`search_isr_queue`/`call_isr`（暫定版）の
 コード本体（残り約400バイト）で説明でき、桁の誤りは無い。
 
+**★ROM増分の最終確認（ISR段階 Task 7、HEAD 99d11f5）**：Task 3 の記録は「暫定版
+`call_isr`」時点のスナップショットであり、その後 Task 4（`call_isr` の MP対応版への
+全面書き直し）・Task 5（`acre_isr`/`del_isr` の追加、quiesce 新設）で恒常リンクされる
+コードが増えたため、Task 3 の増分だけでは HEAD の実際の footprint を表さない。
+Task 7 時点で `size build/musca_b1-2core/fmp` を再実測した：
+text=60756 / data=32 / bss=24820。Task 3 からの追加増分は **text +1304 / data +0 /
+bss +0** バイト（bss 不変＝`ISRCB`/`free_isrcb` 等のデータ構造は Task 3 で確定済みで
+Task 4/5 は関数本体のみを追加したため、という理解と整合）。ベースライン
+（変更前 f1f1d53）からの総増分は **text +1796 / data +0 / bss +72** バイト。
+本受容（訂正D）はこの最終値に対して有効であることをここで確定する。
+
 種別: add=追加 / patch=部分改変 / replace=置換 / remove=削除 / none=無改変（差分ゼロだが，
 運用上の注意が必要なため記録目的で本表に載せている。現状 `cfg/` のみ）
 
@@ -284,6 +295,42 @@ ISRINIB 表・ISRCB 実体・`p_isrcb_table`・`isrorder_table`・`tmax_isrid`/`
   （`mact_tsk`/`mig_tsk` のロック前 `p_tinib` 読み）・段階3a `acre_mtx` の未検査 `ceilpri` と
   同系統の「ユーザ誤用経路の hardening」課題として引き継ぐ。**段階3b では到達可能性の実証も
   修正も行っていない。**
+
+- **（2026-08-04 ISR段階 Task 7 追記）`kernel/interrupt.trb:338-346`（Python 側は
+  `interrupt.py` の対応行）の `isrorder_table` 生成には、他の表（`isrinib_table`／
+  `p_isrcb_table` 等）と異なり `TNUM_SISRID == 0` のガードが**必要だった**という
+  事実そのものは新しい観察ではなく（Task 2 で `TOPPERS_EMPTY_LABEL` ガードを実装済み、
+  本表 `kernel/interrupt.trb（ISR段階 Task 2）` 行の逸脱③を参照）、ここで記録するのは
+  **dcre 自身の該当箇所（`extension/dcre/kernel/interrupt.trb:338-346` 相当）にこの
+  ガードが無い**という観察である。dcre のまま静的 ISR が 0 個の構成（`AID_ISR` のみで
+  `CRE_ISR` が無い等）に適用すると `const ID _kernel_isrorder_table[TNUM_SISRID] = { };`
+  ＝ゼロ長配列＋空初期化子（GNU 拡張）を出力する。GCC では警告なくコンパイルが通るため
+  **現行バグではなく**、他のツールチェーンへ dcre を移植する際の可搬性の懸念に留まる。
+  したがって上流報告候補には加えない（候補は 4 件のまま）。FMP3 側は既に
+  `TOPPERS_EMPTY_LABEL` でガード済みのため実害はない。
+
+- **（2026-08-04 ISR段階 Task 7 追記）`acre_isr` は `intno` の範囲検査を持たない
+  （訂正A・本表 `kernel/interrupt.c（dcre動的ISR Task 3）` 行の逸脱(3)を参照）。**
+  検査は cfg が生成するグローバル適格 intno 表の二分探索（`search_isr_queue` 相当）
+  のみで行われ、これは**十分である**と判断している（表は cfg が生成する閉じた集合であり、
+  範囲外の値が表に載ることはないため、実行時の追加検査は論理的に不要）。ただし
+  **dcre は範囲外 intno を `E_PAR` で報告するのに対し、FMP3 は `E_OBJ`
+  （範囲外・CFG_INT 無し・未 ENA_DYNISR・DEF_INH 競合を区別しない一括の ercd）で
+  報告する**という ercd の非互換がある。FMP3 では `(prcid, intno)` の2引数を取る
+  `VALID_INTNO` がコアに依存しうるため、dcre のようにコア非依存の `E_PAR` 検査を
+  維持する手段が存在しない（Codex 指摘 #3 への対応として意図的に削除した）。
+  dcre 向けに書かれたアプリケーションを FMP3 へ移植する際、`acre_isr` の異常系で
+  ercd の差（`E_PAR` ではなく `E_OBJ` が返る）が観測されうることを非互換として明記する。
+  未 hardening ではなく設計上の意図的帰結であり、対処はスコープ外。
+
+- **（2026-08-04 ISR段階 Task 7・上流報告候補の最終確認）上流報告候補は 4 件
+  （a=段階1、b=解消済み・未報告、c=`malloc_mempool` の符号混在比較、d=`del_flg`/
+  `del_dtq` の `CHECK_PAR`→`CHECK_ID` 不整合2件）のまま、ISR 段階では増えていない。**
+  ISR 段階で `del_isr` が候補 d と同型（`CHECK_PAR` の使用）になっていないかを確認した
+  結果、`del_isr` は dcre 自身が `CHECK_ID`（E_ID）であり（本表 `kernel/interrupt.c
+  （dcre動的ISR Task 3）` 行に記録済み）、候補 d が求める「dcre 自身の `CHECK_PAR`/
+  `CHECK_ID` 不整合」には該当しない。**3件目を探して見つからなかった、という事実**
+  （見つけて拡張しなかったのではない）として記録する。
 
 ## 解消済み事項
 
