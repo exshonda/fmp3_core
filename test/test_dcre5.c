@@ -83,7 +83,20 @@
  *	TASK3: 高優先度タスク，TA_ACT属性（静的・PRC2．手先）
  *	INTNO1（PRC1）: 静的 ISR_S4(isrpri 4)・ISR_S2(isrpri 2) ＋ ENA_DYNISR
  *	INTNO2（PRC2）: 静的 ISR なし ＋ ENA_DYNISR（★手順9 の完全ドレインに使う）
+ *	INTNO3（PRC1）: 静的 ISR_SELF(isrpri 6) のみ．ENA_DYNISR しない・発火しない
+ *	  （自立化用．2レンジ ID 検証／del_isr 静的拒否検証に使う．下記追記参照）
  *	AID_ISR(4): 動的スロット4個
+ *
+ * 【自立化（hardening パス後の追記）】
+ *
+ *	旧版は上記2検証に syssvc/serial.cfg 由来の ISR_SIO（別 cfg ファイルの
+ *	静的 ISR）を使っていたが、ISR_SIO を除外する downstream 構成（esp32_s3）で
+ *	test_dcre5 がビルドできない（ISR_SIO undeclared）ことが判明したため、
+ *	本ファイル自身の3本目の静的 ISR（INTNO3／ISR_SELF、発火しない）に
+ *	差し替えて自立化した（docs/qa-esp32s3-20260804-2.md Q-3 で確約した対応）。
+ *	検証していた性質（動的ID > 静的ID の2レンジ分割、del_isr の静的拒否）は
+ *	変わらず保たれている。クロスファイル性（別 cfg 由来の静的 ID でも成り立つ
+ *	こと）は失われたが、それ自体は本テストの主目的ではなかった。
  *
  * 【チェックポイント】
  *
@@ -202,6 +215,22 @@ void
 static_isr(EXINF exinf)
 {
 	intno1_clear();
+	isr_log_put((char) exinf);
+}
+
+/*
+ *  静的 ISR（自立化用・INTNO3・発火されない）
+ *
+ *  test_dcre5 の自立化（syssvc/serial.cfg 由来の ISR_SIO への依存の解消，
+ *  docs/qa-esp32s3-20260804-2.md Q-3）のために追加した，本ファイル内の
+ *  3本目の静的 ISR．2レンジ ID 検証と del_isr の静的拒否（E_OBJ）の検証に
+ *  のみ使う．INTNO3 は ras_int されない（意図的に発火しない）ため，
+ *  本体は呼ばれない（呼ばれても他の静的 ISR と同じ流儀で記録するだけ）．
+ */
+void
+static_isr_self(EXINF exinf)
+{
+	intno3_clear();
 	isr_log_put((char) exinf);
 }
 
@@ -421,7 +450,9 @@ task1(EXINF exinf)
 	erid = acre_isr(&cisr);
 	check_assert(erid > ISR_S2);	/*  2レンジ ISRID の直接検証  */
 	check_assert(erid > ISR_S4);
-	check_assert(erid > ISR_SIO);
+	check_assert(erid > ISR_SELF);	/*  自立化：本ファイル内の3本目の静的ISR（旧・他cfgのISR_SIO）でも
+					 *  動的ID > 静的ID の2レンジ分割が成り立つことを検証する
+					 *  （クロスファイル性は薄れたが，分割の性質自体は保たれる）  */
 	id_a = (ID) erid;
 
 	cisr.exinf = (EXINF) 'b';	cisr.isrpri = 3;
@@ -575,7 +606,8 @@ task1(EXINF exinf)
 	check_ercd(del_isr(0), E_ID);
 	check_ercd(del_isr(TNUM_ISRID + 1), E_ID);
 	check_ercd(del_isr(ISR_S2), E_OBJ);			/*  静的生成オブジェクト  */
-	check_ercd(del_isr(ISR_SIO), E_OBJ);
+	check_ercd(del_isr(ISR_SELF), E_OBJ);			/*  自前で acre していない静的ISRでも del_isr が
+							 *  拒否することの検証（旧・ISR_SIO）  */
 
 	/*  スロット4個を使い切る → E_NOID  */
 	cisr.exinf = (EXINF) 'p';	erid = acre_isr(&cisr);	check_assert(erid > ISR_S4);

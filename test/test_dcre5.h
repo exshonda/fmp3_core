@@ -79,6 +79,7 @@ extern void	task1(EXINF exinf);
 extern void	task2(EXINF exinf);
 extern void	task3(EXINF exinf);
 extern void	static_isr(EXINF exinf);
+extern void	static_isr_self(EXINF exinf);
 extern void	dyn_isr(EXINF exinf);
 extern void	long_isr(EXINF exinf);
 extern void	ctx_isr(EXINF exinf);
