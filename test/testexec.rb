@@ -89,6 +89,7 @@ TEST_SPEC = {
   "cpuexc10" => { SRC: "test_cpuexc10", CFG: "test_cpuexc" },
   "dcre1"    => { SRC: "test_dcre1" },
   "dcre2"    => { SRC: "test_dcre2" },
+  "dcre3"    => { SRC: "test_dcre3" },
   "dcremix"  => { SRC: "test_dcre_mix" },
   "dlynse"   => { SRC: "test_dlynse" },
   "dtq1"     => { SRC: "test_dtq1" },
