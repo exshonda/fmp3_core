@@ -96,6 +96,9 @@ mutex_check_ceilpri
 mutex_acquire
 mutex_release
 mutex_release_all
+free_mtxcb
+tmax_smtxid
+amtxinib_table
 
 # mempfix.c
 initialize_mempfix

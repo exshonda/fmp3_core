@@ -97,7 +97,7 @@ pridataq = pdqini.o pdqenq.o pdqdeq.o pdqsnd.o pdqrcv.o \
 		snd_pdq.o psnd_pdq.o tsnd_pdq.o \
 		rcv_pdq.o prcv_pdq.o trcv_pdq.o ini_pdq.o ref_pdq.o
 
-mutex = mtxini.o mtxchk.o mtxacq.o mtxrel.o mtxrela.o \
+mutex = mtxini.o mtxchk.o mtxacq.o mtxrel.o mtxrela.o acre_mtx.o del_mtx.o \
 		loc_mtx.o ploc_mtx.o tloc_mtx.o unl_mtx.o ini_mtx.o ref_mtx.o
 
 mempfix = mpfini.o mpfget.o get_mpf.o pget_mpf.o tget_mpf.o \

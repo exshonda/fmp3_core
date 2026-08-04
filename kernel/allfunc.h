@@ -196,6 +196,8 @@
 #define TOPPERS_mtxacq
 #define TOPPERS_mtxrel
 #define TOPPERS_mtxrela
+#define TOPPERS_acre_mtx
+#define TOPPERS_del_mtx
 #define TOPPERS_loc_mtx
 #define TOPPERS_ploc_mtx
 #define TOPPERS_tloc_mtx

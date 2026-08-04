@@ -121,6 +121,9 @@
 #define mutex_acquire				_kernel_mutex_acquire
 #define mutex_release				_kernel_mutex_release
 #define mutex_release_all			_kernel_mutex_release_all
+#define free_mtxcb					_kernel_free_mtxcb
+#define tmax_smtxid					_kernel_tmax_smtxid
+#define amtxinib_table				_kernel_amtxinib_table
 
 /*
  *  mempfix.c

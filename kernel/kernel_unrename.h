@@ -122,6 +122,9 @@
 #undef mutex_acquire
 #undef mutex_release
 #undef mutex_release_all
+#undef free_mtxcb
+#undef tmax_smtxid
+#undef amtxinib_table
 
 /*
  *  mempfix.c
