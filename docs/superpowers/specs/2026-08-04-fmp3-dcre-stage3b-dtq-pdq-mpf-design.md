@@ -111,9 +111,14 @@ TFN コードの既存有無は実装前確認（3a では6個とも既存だっ
   `CHECK_PAR(MB_ALIGN(p_mpfmb))`。INIBに格納する blksz は `ROUND_MPF_T(blksz)`。
 - `del_*`: E_NOEXS → E_OBJ（静的）→ 両待ちキュー（dtq/pdq は swait+rwait、mpf は
   wait_queue のみ）を init_wait_queue で E_DLT 解放 → TA_MEMALLOC なら mpf ブロック領域 free_mpk →
-  TA_MBALLOC なら管理領域 free_mpk → **属性を読んでから** TA_NOEXS に書き込む
-  （TA_NOEXS は全ビット 1 なので、先に属性を読んでから書き込む必要がある） → free-list。
-  滞留データ（dtq の未受信データ）は破棄される（dcre 意味論 — テストで実証）。
+  TA_MBALLOC なら管理領域 free_mpk
+  - **訂正F**: `del_dtq` は `CHECK_ID(VALID_DTQID(dtqid))`（E_ID）を使う。dcre の del_dtq は
+    `CHECK_PAR`（E_PAR）だが、これは dcre 自身の非一貫（del_pdq/del_mpf は dcre でも
+    CHECK_ID）であり、3a の del_flg（訂正D）に続く2例目。FMP3 は CHECK_ID に統一する
+    （意図的逸脱・DIVERGENCE_MAP 記録・上流報告候補 d の対象拡大）。
+  - **属性を読んでから** TA_NOEXS に書き込む
+    （TA_NOEXS は全ビット 1 なので、先に属性を読んでから書き込む必要がある） → free-list。
+    滞留データ（dtq の未受信データ）は破棄される（dcre 意味論 — テストで実証）。
 
 ## 3. cfg 層
 
@@ -135,16 +140,13 @@ TFN コードの既存有無は実装前確認（3a では6個とも既存だっ
   非親和）、DTQID/PDQID/MPFID の2レンジ置換。
 - **E_NOEXS 23関数の構造変更**: dataqueue.c 9・pridataq.c 8・mempfix.c 6。
   このうち **5関数は lock_cpu 前に p_xxxinib を読むため構造変更が必須**：
-  - `fsnd_dtq`（dataqueue.c:485）: CHECK_ILUSE が p_dtqcb->p_dtqinib->dtqcnt を読む
+  - `fsnd_dtq`（dataqueue.c:486）: CHECK_ILUSE が p_dtqcb->p_dtqinib->dtqcnt を読む
   - `snd_pdq`（pridataq.c:301）: CHECK_PAR が p_pdqcb->p_pdqinib->maxdpri を読む
   - `psnd_pdq`（pridataq.c:357）: CHECK_PAR が p_pdqcb->p_pdqinib->maxdpri を読む
   - `tsnd_pdq`（pridataq.c:408）: CHECK_PAR が p_pdqcb->p_pdqinib->maxdpri を読む
-  - `rel_mpf`（mempfix.c:324-330）: CHECK_PAR が p_mpfcb->p_mpfinib fields を読む
+  - `rel_mpf`（mempfix.c:325-330）: CHECK_PAR が p_mpfcb->p_mpfinib fields を読む
   
-  → 各関数が lock_cpu/lock_cpu_dsp の外で p_xxxinib にアクセスしていることを
-  現物で確認し、ロック取得後に検査を移すか、ロック前に読んだ値を再確認してから
-  使用する。段階1 E_DLT ガード(`dele_tsk` で `winfo.dtqid` を wait 解放前に cond check)
-  と同型の防御。
+  → 防御の形は dcre の当該5関数の構造変更（ロック後への検査移動）をそのまま転写する。
 - 配線: allfunc.h 6行・Makefile.kernel・kernel_rename.def + 再生成。
 
 ## 5. MP 安全性
