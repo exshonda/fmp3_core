@@ -151,6 +151,14 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 
 ## 既知・対処しない事項
 
+- **mpf ブロック領域の受容済みウィンドウ**（段階3b最終レビューで特定・
+  `docs/superpowers/specs/2026-08-04-fmp3-dcre-stage3b-dtq-pdq-mpf-design.md` §1/§5 訂正済み）。
+  `get_mpf` が返す生ポインタはアプリがロック外で使用し、`del_mpf` は貸出中でも
+  ブロック領域ごと解放する（dcre 忠実・アプリ契約）ため、E_NOEXS ゲートは
+  stale ポインタへの参照を防げない。段階1 §2.3 の自終了スタック窓と同類の
+  受容済みウィンドウとして受容（管理領域3種＝p_dtqmb/p_pdqmb/p_mpfmb は
+  ウィンドウ・フリーが成立し，この点と区別する）。対処はスコープ外。
+
 - **`ld: ... has a LOAD segment with RWX permissions` 警告**（`cfg1_out` / `fmp` リンク時）。
   pristine の Microchip リンカスクリプト（`target/polarfire_soc_kit_gcc/sdk/.../mpfs-lim.ld` が
   全領域を rwx 宣言）に起因する無害な警告であり，**意図的に対処しない**（分離しようとする方が
