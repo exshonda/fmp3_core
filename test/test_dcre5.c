@@ -367,6 +367,16 @@ task1(EXINF exinf)
 	 *  ★走査キーが isrpri だけだと，'A' を呼んだ後に「isrpri > 3」の
 	 *    要素（'4'）へ飛んでしまい 'B'/'C' を取りこぼす．本手順は
 	 *    ISR_KEY_GT の第2キー（isrseq）が生きていることの直接検証である．
+	 *
+	 *  ※本 control（negative control 2）が検証するのは「同一 isrpri の順序が
+	 *    isrseq タイブレークに依存すること」であり，enqueue_isr の単調カウンタ化
+	 *    （Task 5 のリセット撤去）が直した「走査中の完全ドレイン→enqueue で
+	 *    新エントリが取りこぼされない」性質は検証していない．本テストの INTNO1
+	 *    キューは静的 ISR_S4/ISR_S2 が常駐し，走査中に完全に空にはならないため
+	 *    （手順4のハンドシェイクでも enqueue 時点で A/C/S4 が残存），旧リセット
+	 *    挙動（キューが空になったときだけ isrseq を 0 へ戻す）でも本テストは
+	 *    通ってしまう．当該性質（完全ドレイン後の enqueue が走査中の cur に
+	 *    負けない）の回帰テストはスイート内に未整備 — hardening pass の課題．
 	 */
 	cisr.isrpri = 3;
 	cisr.exinf = (EXINF) 'A';	erid = acre_isr(&cisr);	check_assert(erid > ISR_S4);
