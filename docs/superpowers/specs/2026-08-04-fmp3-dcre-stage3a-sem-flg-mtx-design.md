@@ -81,12 +81,14 @@ TFN_DEL_SEM(-210):147 / TFN_DEL_FLG(-211):148 / TFN_DEL_MTX(-215):151。
 
 ### 1.3 エラーと検査（dcre 準拠）
 
-- `acre_sem`: CHECK_VALIDATR(sematr, TA_TPRI)、**訂正E**: `isemcnt` は落とす、`1 <= maxsem <= TMAX_MAXSEM`
-  の範囲検査のみ（dcre semaphore.c:188-189 準拠。isemcnt チェックは冗長 — init でカウント初期化が先決）、E_NOID。
+- `acre_sem`: CHECK_VALIDATR(sematr, TA_TPRI)、**訂正E**: dcre の検査のうち uint_t に
+  対して恒真の下限 `0 <= isemcnt` のみ落とし、**`isemcnt <= maxsem` は維持**、
+  `1 <= maxsem && maxsem <= TMAX_MAXSEM` も維持（dcre semaphore.c:188-189 準拠）、E_NOID。
 - `acre_flg`: CHECK_VALIDATR(flgatr, TA_TPRI|TA_WMUL|TA_CLR)、E_NOID。
 - `acre_mtx`: `mtxatr == TA_CEILING` なら VALID_TPRI(ceilpri) を検査、それ以外は
   CHECK_VALIDATR(mtxatr, TA_TPRI)（dcre mutex.c:395-410 の分岐そのまま）。E_NOID。
-- `del_*` 共通: E_NOEXS（TA_NOEXS）→ **訂正D**: `del_flg` も CHECK_ID（E_ID）、E_PAR ではない（dcre と同型）
+- `del_*` 共通: E_NOEXS（TA_NOEXS）→ **訂正D**: `del_flg` も CHECK_ID（E_ID）、E_PAR ではない
+  （dcre の del_sem/del_mtx および FMP3 の flg 系多数派と同型。dcre の del_flg 自身は CHECK_PAR で非一貫 — 上流報告候補 d）
   → E_OBJ（静的 = id <= tmax_s*id）→ 成功。
   **E_NOMEM 経路なし**（3オブジェクトともプール不使用）。
 
@@ -95,14 +97,16 @@ TFN_DEL_SEM(-210):147 / TFN_DEL_FLG(-211):148 / TFN_DEL_MTX(-215):151。
 - **待ちタスクがいても削除は成功**し、待ちタスクは E_DLT で強制解除する。
   実装は FMP3 既存の `init_wait_queue(p_my_pcb, &wait_queue)`（wait.c:215-228、
   **MP 対応済み**・既存 ini_* と同一機構）を呼ぶだけ。新規の解除機構は書かない。
-- **del_mtx はロック中でも成功**（dcre mutex.c:430-475 と同一）:
-  `p_loctsk != NULL` なら **訂正F**: `p_loctsk = NULL` を設定してから `remove_mutex(p_loctsk, p_mtxcb)` で
-  所有タスクのチェーンから外し、ceiling mutex なら優先度復帰を行う。FMP3 の `remove_mutex`（mutex.c:223-236）と
-  `mutex_drop_priority`（mutex.c:272、**MP 版は p_my_pcb 引数が先頭に付く** — dcre との
-  シグネチャ差異に注意）をそのまま使う。呼び出し順・引数は現物の unl_mtx / ini_mtx の
-  流儀に合わせる（実装前確認 §8-3）。
-  **重要**: `MTX_CEILING(p_mtxcb)` は `p_mtxcb->p_mtxinib->mtxatr` を読むため、**`mtxatr = TA_NOEXS`
-  を書く前に優先度復帰を済ませる**必要がある（順序を誤ると ceiling mutex の優先度が復帰しない）。
+- **del_mtx はロック中でも成功**（dcre mutex.c:430-475 と同一）。ロック中の場合の手順は
+  FMP3 の ini_mtx（mutex.c:606-614）と同一順序:
+  ① `p_loctsk = p_mtxcb->p_loctsk;`（ローカルへ退避）
+  ② `p_mtxcb->p_loctsk = NULL;`（CB フィールドのクリア — **訂正F**: dcre は省くが ini_mtx に倣う）
+  ③ `remove_mutex(p_loctsk, p_mtxcb)`（②の後でも①のローカルは非 NULL なので安全）
+  ④ ceiling mutex なら `mutex_drop_priority(p_my_pcb, p_loctsk, ...)` で優先度復帰
+     （MP 版は p_my_pcb が先頭引数）
+  **重要**: `MTX_CEILING(p_mtxcb)` は `p_mtxcb->p_mtxinib->mtxatr` を読むため、
+  ④の優先度復帰を済ませてから `mtxatr = TA_NOEXS` を書くこと（順序を誤ると
+  ceiling の優先度が復帰しない）。
 - 待ち解除で起きたタスクの再スケジュールは init_wait_queue / make_non_wait が面倒を見る
   （既存機構）。del_* 側でディスパッチ判断が必要かは **訂正C**: 3つの `del_*` とも
   `CHECK_TSKCTX_UNL_MYSTATE(&p_selftsk)` を使う（ini_flg/ini_mtx に統一）（§8-3）。
@@ -153,10 +157,12 @@ TFN_DEL_SEM(-210):147 / TFN_DEL_FLG(-211):148 / TFN_DEL_MTX(-215):151。
 3. **訂正G**: 混在 AID（AID_CYC>0 / AID_ALM=0 等）の equivalence サンプル cfg（同 Minor 3）。
    段階3a の AID 追加で組合せが増えるため、**sem/flg/mtx の混在サンプルも1ケース Task 2-3 に追加**
    （cfg 単独バリアント = CMake の constraint で作成不可）。
-4. **訂正H**: TEPP_PRC 検査エラー回帰 cfg は構成不能（マスタプロセッサのエラー回帰を
-   任意ターゲットで作成できない — 上流 dpendency constraint）。**mutation control で代替**：
-   del_sem/del_flg/del_mtx の queue_insert_prev を無効化する mutation を各々適用した
-   ビルドで、再 acre → E_NOID の dynamic recovery を実証（エラー行列 18 件）。
+4. **訂正H**: TEPP_PRC 検査のエラー回帰 cfg は構成不能（全8プリセットでマスタ bit が
+   立っており、.cfg から TOPPERS_TEPP_PRC は変更できない）。代替として
+   **条件反転の mutation control** を行う: kernel.py / kernel.trb に追加する
+   TEPP_PRC 検査の条件を一時的に反転し、従来通るはずの musca_b1-2core の cfg が
+   両エンジンとも同一文言のエラーで失敗することを実証してから復元する
+   （検査が空虚でないことの実演）。この結果、Task 8 のエラー行列は 12+6=18 件。
 5. DIVERGENCE_MAP の cyclic.c 行へ CHECK_PAR 恒真条件除去の半文追記（同 Minor 4）。
 
 ## 6. MP 安全性
