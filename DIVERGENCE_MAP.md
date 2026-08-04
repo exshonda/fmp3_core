@@ -105,7 +105,7 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
 | kernel/kernel_rename.def（dcre段階3a Task 4） | mod (dcre-port) | `# semaphore.c` 節に `free_semcb`/`tmax_ssemid`/`aseminib_table` の3エントリを追加 | - |
 | kernel/kernel_rename.h・kernel_unrename.h（dcre段階3a Task 4） | mod (dcre-port, 生成物) | `utils/genrename.rb kernel` で再生成（手編集ではない）。`git diff --stat` は両ファイルとも各+3行・削除0行（`# semaphore.c` 節に3エントリの `#define`/`#undef` が追加されただけ、他の差分なし） | - |
 | kernel/eventflag.h（dcre段階3a Task 5） | mod (dcre-port) | Task 4 の `semaphore.h` 行と同型（`tmax_sflgid`／`QUEUE free_flgcb`／`aflginib_table[]` の extern 追加、`tnum_flg` の移設と `tnum_sflg` 新設、既存 `FLGID` の2レンジ版への置換、`#include <queue.h>` は既存で追加不要） | - |
-| kernel/eventflag.c（dcre段階3a Task 5） | mod (dcre-port) | `#define tnum_flg` を削除（`.h` へ移設）。`QUEUE free_flgcb;` の定義を追加。`initialize_eventflag` の静的ループ境界を `tnum_flg` → `tnum_sflg` に変更し、既存のマスタ限定ブロックの中に動的スロット初期化を追加。イベントフラグは非親和オブジェクトのため `iprcid`/`affinity`/`p_pcb` の充填やプロセッサ判定は一切行っていない。`acre_flg`/`del_flg` を追加（dcre `eventflag.c:203-241`/`:246-284` の転写）。dcre からの意図的な逸脱4件：(1) glock の対化、(2) 空判定 `tnum_flg == 0` → `tnum_flg == tnum_sflg`、(3) `del_flg` の `CHECK_TSKCTX_UNL()`＋`p_runtsk` を `CHECK_TSKCTX_UNL_MYSTATE(&p_selftsk)`＋`p_selftsk != p_my_pcb->p_schedtsk` へ、(4) ★dcre `eventflag.c:257` の `CHECK_PAR(VALID_FLGID(flgid))`（E_PAR）を `CHECK_ID(VALID_FLGID(flgid))`（E_ID）へ — dcre 自身の不整合（`del_sem`/`del_mtx` は `CHECK_ID`、FMP3 の flg 系サービスコールも全て `CHECK_ID`）。`set_flg`/`clr_flg`/`wai_flg`/`pol_flg`/`twai_flg`/`ini_flg`/`ref_flg` の7関数に existence-before-state 規約の E_NOEXS 分岐を挿入（既存ロジックは字下げのみで byte-preserve、`clr_flg` の行末空白も保存） | 報告候補（段階3a Task 8 上流報告候補 d。dcre `eventflag.c:257` の `del_flg` だけが `CHECK_PAR(VALID_FLGID(flgid))`（E_PAR）を使っており、`del_sem`（`semaphore.c:230`）・`del_mtx`（`mutex.c:440`）は `CHECK_ID`（E_ID）で、FMP3 の flg 系サービスコール自身も全て `CHECK_ID`。dcre 自身の不整合であり、証拠は行番号つきで完備。送付するかはユーザ判断（候補 b は段階2 で解消済みだが上流には未報告のまま、と同じ扱い）） |
+| kernel/eventflag.c（dcre段階3a Task 5） | mod (dcre-port) | `#define tnum_flg` を削除（`.h` へ移設）。`QUEUE free_flgcb;` の定義を追加。`initialize_eventflag` の静的ループ境界を `tnum_flg` → `tnum_sflg` に変更し、既存のマスタ限定ブロックの中に動的スロット初期化を追加。イベントフラグは非親和オブジェクトのため `iprcid`/`affinity`/`p_pcb` の充填やプロセッサ判定は一切行っていない。`acre_flg`/`del_flg` を追加（dcre `eventflag.c:203-241`/`:246-284` の転写）。dcre からの意図的な逸脱4件：(1) glock の対化、(2) 空判定 `tnum_flg == 0` → `tnum_flg == tnum_sflg`、(3) `del_flg` の `CHECK_TSKCTX_UNL()`＋`p_runtsk` を `CHECK_TSKCTX_UNL_MYSTATE(&p_selftsk)`＋`p_selftsk != p_my_pcb->p_schedtsk` へ、(4) ★dcre `eventflag.c:257` の `CHECK_PAR(VALID_FLGID(flgid))`（E_PAR）を `CHECK_ID(VALID_FLGID(flgid))`（E_ID）へ — dcre 自身の不整合（`del_sem`/`del_mtx` は `CHECK_ID`、FMP3 の flg 系サービスコールも全て `CHECK_ID`）。`set_flg`/`clr_flg`/`wai_flg`/`pol_flg`/`twai_flg`/`ini_flg`/`ref_flg` の7関数に existence-before-state 規約の E_NOEXS 分岐を挿入（既存ロジックは字下げのみで byte-preserve、`clr_flg` の行末空白も保存） | 報告候補（段階3a Task 8 上流報告候補 d。dcre `eventflag.c:257` の `del_flg` だけが `CHECK_PAR(VALID_FLGID(flgid))`（E_PAR）を使っており、`del_sem`（`semaphore.c:230`）・`del_mtx`（`mutex.c:440`）は `CHECK_ID`（E_ID）で、FMP3 の flg 系サービスコール自身も全て `CHECK_ID`。dcre 自身の不整合であり、証拠は行番号つきで完備。送付するかはユーザ判断（候補 b は段階2 で解消済みだが上流には未報告のまま、と同じ扱い）。★段階3b Task 3 で `del_dtq`（`kernel/dataqueue.c:413`）も同型の `CHECK_PAR`→`CHECK_ID` 不整合と判明し、候補 d は「`del_flg` と `del_dtq` の2件」へ拡張された（詳細は本表 `kernel/dataqueue.c（dcre段階3b Task 3）` 行を参照）） |
 | kernel/allfunc.h（dcre段階3a Task 5） | mod (dcre-port) | `/* eventflag.c */` 節の `#define TOPPERS_flgcnd` の直後に `TOPPERS_acre_flg`/`TOPPERS_del_flg` の2行を追加（ALLFUNC ビルドで新規関数を有効化するため必須） | - |
 | kernel/Makefile.kernel（dcre段階3a Task 5） | mod (dcre-port) | `eventflag =` の .o 列挙に `acre_flg.o`/`del_flg.o` を追加（上流形式の維持目的。`KERNEL_FCSRCS` は無改変。CMake の `ALLFUNC` ビルドはこの行を参照しないため実ビルドには影響しない） | - |
 | kernel/kernel_rename.def（dcre段階3a Task 5） | mod (dcre-port) | `# eventflag.c` 節に `free_flgcb`/`tmax_sflgid`/`aflginib_table` の3エントリを追加 | - |
@@ -217,6 +217,20 @@ pristine を改変したら必ずここに記録する（マージ衝突解決�
   に `-Os`/`-O0` 等を積んでいない）ため実害は無いが、将来 target.cmake 側で
   `-Os`/`-O0` 等に上書きしたいターゲットを追加すると、上流と違って上書きできない
   （常に `-O2` に戻される）ことになる。対処は本レビュー対応のスコープ外と判断し記録に留める。
+
+- **（2026-08-04 dcre段階3b Task 7 追記）`acre_dtq`/`acre_pdq`/`acre_mpf` は乗算の桁あふれを
+  検査しない（dcre 由来・未 hardening）。** `acre_dtq`/`acre_pdq` は管理領域サイズ
+  `sizeof(DTQMB) * dtqcnt` / `sizeof(PDQMB) * pdqcnt` を、`acre_mpf` はブロック領域サイズ
+  `ROUND_MPF_T(blksz) * blkcnt` を、いずれも `dtqcnt`/`pdqcnt`/`blkcnt`/`blksz` の上限検査を
+  行わずに `malloc_mpk` へ渡す（`kernel/dataqueue.c`・`kernel/pridataq.c`・`kernel/mempfix.c`、
+  段階3b Task 3/4/5）。`size_t` で桁あふれすると `malloc_mpk` に想定外に小さい値が渡り、
+  本来収まらないはずの確保が**成功してしまう**（その後 `enqueue_data` 等が範囲外を書く）。
+  `kernel/startup.c` の `malloc_mempool` が持つ符号混在比較（上流報告候補 c。
+  `((char *)limit - (char *)brk) >= size` が `ptrdiff_t >= size_t`）と組み合わさると、
+  ユーザが巨大な `dtqcnt`/`pdqcnt`/`blkcnt` を渡す誤用経路で悪化しうる。段階1 deferred #1
+  （`mact_tsk`/`mig_tsk` のロック前 `p_tinib` 読み）・段階3a `acre_mtx` の未検査 `ceilpri` と
+  同系統の「ユーザ誤用経路の hardening」課題として引き継ぐ。**段階3b では到達可能性の実証も
+  修正も行っていない。**
 
 ## 解消済み事項
 
