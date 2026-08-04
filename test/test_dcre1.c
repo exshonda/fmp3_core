@@ -203,6 +203,21 @@ task1(EXINF exinf)
 	erid = acre_tsk(&ctsk);
 	check_assert(erid == E_NOMEM);
 	ctsk.stksz = STACK_SIZE;
+
+	/*
+	 *  ★スタックサイズの丸めがあふれる場合は E_PAR
+	 *  （hardening パス Task 1 の H-4。ROUND_STK_T(stksz) の加算あふれ）
+	 *
+	 *  stksz は size_t なので，32bit/64bit のどちらでも到達可能である
+	 *  （dtqcnt 等と違って #if のガードが要らない）．検査が無いと丸め結果が
+	 *  0 付近へ落ち，aligned_alloc_mpk が「成功」してゼロ長スタックの
+	 *  タスクができあがる．
+	 */
+	ctsk.stksz = SIZE_MAX;
+	erid = acre_tsk(&ctsk);
+	check_assert(erid == E_PAR);
+	ctsk.stksz = STACK_SIZE;
+
 	erid = acre_tsk(&ctsk);
 	check_assert(erid > 0);
 	dtskid1 = (ID) erid;

@@ -553,6 +553,47 @@ task1(EXINF exinf)
 	cmpf.mpfatr = TA_TPRI;
 
 	/*
+	 *  ★サイズ計算のあふれ検査（hardening パス Task 1 で追加した CHECK_PAR）
+	 *
+	 *  dtqcnt/pdqcnt/blkcnt は uint_t，sizeof(DTQMB) 等は size_t である．
+	 *  両者が同幅のターゲット（32bit）でのみ積があふれうるので，検査に
+	 *  到達できるのも 32bit ターゲットに限る．64bit では同じ入力が検査を
+	 *  素通りして E_NOMEM になる（あふれないので正しい挙動である）．
+	 *
+	 *  ★この #if が丸ごと消えていて 1 行も実行されていない，という事態を
+	 *  防ぐため，#if の外で同じ条件を実行時にも確かめる（下の check_assert）．
+	 *  本テストは musca_b1-2core でのみ実行するので，ここは必ず真である．
+	 */
+	check_assert(sizeof(size_t) == sizeof(uint_t));
+
+#if SIZE_MAX == UINT_MAX
+	/*  (a) acre_dtq: dtqcnt * sizeof(DTQMB) があふれる  */
+	cdtq.dtqcnt = UINT_MAX;
+	check_assert(acre_dtq(&cdtq) == E_PAR);
+
+	/*  (b) acre_pdq: pdqcnt * sizeof(PDQMB) があふれる  */
+	cpdq.pdqcnt = UINT_MAX;
+	check_assert(acre_pdq(&cpdq) == E_PAR);
+
+	/*  (c) acre_mpf: ROUND_MPF_T(blksz) * blkcnt があふれる  */
+	cmpf.blkcnt = UINT_MAX;
+	cmpf.blksz = MPF_BLKSZ;
+	check_assert(acre_mpf(&cmpf) == E_PAR);
+
+	/*  (d) acre_mpf: ROUND_MPF_T(blksz) の丸めそのものがあふれる
+	 *      （検査が無いと丸め結果が 0 になり，blksz==0 のプールができる）  */
+	cmpf.blkcnt = MPF_BLKCNT;
+	cmpf.blksz = UINT_MAX;
+	check_assert(acre_mpf(&cmpf) == E_PAR);
+#endif /* SIZE_MAX == UINT_MAX */
+
+	/*  以降の手順のためにパケットを元へ戻す  */
+	cdtq.dtqcnt = 1U;
+	cpdq.pdqcnt = 3U;
+	cmpf.blkcnt = MPF_BLKCNT;
+	cmpf.blksz = MPF_BLKSZ;
+
+	/*
 	 *  ★プールが実際に返っていることの実証
 	 *
 	 *  del_mpf が TA_MEMALLOC のブロック領域を free_mpk しなければ，
