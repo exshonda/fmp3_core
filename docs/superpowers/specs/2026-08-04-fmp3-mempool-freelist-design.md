@@ -207,6 +207,19 @@ typedef struct data_management_block {
 依らず成立する（**「4B」という具体数値は32bitターゲット限定**であり、
 `intptr_t` 幅に一般化して読むこと）。
 
+**【裁定 2026-08-04】計画 spec-issue 2 — 上記分析の見落としの訂正**:
+`kernel/mempfix.c:294` の `malloc_mpk(sizeof(MPFMB) * blkcnt)` を上記の
+全数確認から見落としていた。`MPFMB` は `uint_t`（常に4B）のため、
+**64bit ターゲットでは `blkcnt==1` の要求が 4B となり、`FREEBLK`
+（8B）がユーザ領域に収まらない**——「ユーザ領域幅 ≥ ポインタ幅」は
+64bit では偽。ただし解放時の `FREEBLK` 書込みのはみ出し（4B）は、
+`sizeof(FREEBLK) == sizeof(MPHDR)` とアライン剰余の関係により
+**次の割付のヘッダ直前に必ず存在する死領域（パディング）に収まり、
+隣接割付・ヘッダを破壊しない**。この論証は実装のコードコメントに
+明記すること（実装計画 Task 1 に含む）。64bit ターゲットでの runtime
+実測は現行テスト体制に無い（dcre 機能テストは musca/kria_r5 系で実行）
+ことを既知の未実測事項として記録する。
+
 **サイズ0の割付**: `size==0` の malloc_mpk 呼出しがもし発生すると、
 ユーザ領域が0バイトになり `FREEBLK` を書き込む場所が無くなる。現行の
 呼出し側（6箇所）を確認した限り、`dtqcnt`/`pdqcnt`/`blkcnt`/`blksz`
@@ -227,9 +240,14 @@ typedef struct data_management_block {
 - **alloc(alignment, size)**: `freelist` を先頭から線形走査し、
   「`MPHDR.size == 要求 size`」かつ「`(uintptr_t)ptr & (alignment-1) == 0`
   （ポインタ実アライン適合）」の**最初のエントリ**を unlink して返す
-  （`count++`）。該当なしなら従来の bump（既存の overflow ガード列
-  `kernel/startup.c:506-536` に `size + sizeof(MPHDR)` のあふれ検査を
-  追加する）。
+  （`count++`）。該当なしなら従来の bump。あふれ検査は既存のガード列
+  （`kernel/startup.c:506-536`）を拡張するが、ヘッダ直前配置では
+  `size + sizeof(MPHDR)` という加算は式の上に現れない——実際にあふれうる
+  加算は `brk + sizeof(MPHDR)`（ヘッダ分の前進）とアライン調整加算であり、
+  **この2つを順にガードする**（【裁定 2026-08-04】計画 spec-issue 1:
+  当初の「size + sizeof(MPHDR) のあふれ検査」という字面は不正確で、
+  計画側の式を正とする。意図＝「ヘッダ分を含む全加算があふれないこと」
+  は同一）。
 - **free(ptr)**: ユーザ領域先頭に `FREEBLK` を書いて `freelist` へ push
   （O(1)、LIFO）、`count--`。ヘッダ（`MPHDR.size`）は触らず残す。
 - **count==0**: 従来どおり `brk` を全リセット、かつ `freelist = NULL`
