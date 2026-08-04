@@ -48,6 +48,7 @@
 #include "check.h"
 #include "task.h"
 #include "interrupt.h"
+#include "spin_lock.h"
 
 /*
  *  トレースログマクロのデフォルト定義
@@ -326,35 +327,157 @@ initialize_isr(PCB *p_my_pcb)
 #ifdef TOPPERS_isrcal
 
 /*
- *  ★★これはTask 3の暫定実装である．Task 4でMP対応版へ全面的に置き換える．
+ *  割込みサービスルーチン呼出しキューの走査
  *
- *  この版はdcre interrupt.c:240-260の素朴な単方向走査であり，
- *  「走査とacre_isr/del_isrが時間的に排他である」という単一プロセッサの
- *  前提に依存している．FMP3では成立しないため，このままでは使えない．
- *  型（ISRQCB *）と表の結線が正しいことをTask 3の時点で独立に検証する
- *  ためだけに置いている．
+ *  ENA_DYNISRされた割込み番号の割込みハンドラ（cfgが生成する
+ *  _kernel_inthdr_<intno>）から呼ばれる．キューに登録された割込みサービス
+ *  ルーチンを(isrpri, isrseq)の辞書式昇順に呼び出す．
+ *
+ *  【dcre（interrupt.c:240-260）との相違と，その理由】
+ *
+ *  dcreは単方向リストを p_queue = p_queue->p_next で辿るだけである．これは
+ *  「走査（割込み文脈）とacre_isr/del_isr（タスク文脈）が時間的に排他である」
+ *  という単一プロセッサの性質に依存している．FMP3ではコアAの走査とコアBの
+ *  acre_isr/del_isrが真に並行しうるため，この形は使えない．
+ *
+ *  (1) キューの参照はジャイアントロックの下でのみ行う．acre_isr/del_isrも
+ *      ジャイアントロックの下でキューを操作するので，両者は排他される．
+ *      割込み文脈でジャイアントロックを取ること自体はsignal_time
+ *      （time_event.c:709-722）に先例がある．
+ *
+ *  (2) ISR本体はロックを外して呼ぶ（現行のインライン連鎖と同じく，ISRは
+ *      CPUロック解除状態で実行される）．ロックを外している間にキューが
+ *      書き換わりうるので，次に呼ぶISRは「前回呼んだISRの(isrpri, isrseq)
+ *      より大きい最小の要素」としてロック再取得後に再決定する．
+ *
+ *      ★ポインタやISRIDを継続キーにできない理由：del_isrで返却された
+ *      スロットがacre_isrで再利用されると，同じ番地・同じIDが別のISRを
+ *      指すようになり，「もう呼んだかどうか」を判定できなくなる．
+ *      isrseqはenqueueのたびに単調増加する世代番号なので，再利用されても
+ *      新しい値が付き，曖昧にならない．
+ *
+ *      ★isrpriだけでは足りない理由：同一isrpriのISRが複数あるとき，
+ *      「> 前回のisrpri」では同一優先度の残りを取りこぼし，
+ *      「>= 前回のisrpri」では呼んだものを二重に呼ぶ．
+ *
+ *      キューは(isrpri, isrseq)の昇順に保たれている（enqueue_isr）ので，
+ *      先頭から見て条件を最初に満たした要素が最小である．
+ *
+ *  (3) ISR本体の実行中はp_isrcb->runningに自プロセッサのビットを立てる．
+ *      del_isrはキューから外した後にこのビットが全て落ちるまで待つ
+ *      （quiesce）ので，実行中のISRCBがfree-listへ戻って再利用されること
+ *      はない．したがってISR本体から戻った後にp_next->runningを触っても安全
+ *      である（del_isr側はまだ待っている）．
+ *
+ *      runningを（カウンタでなく）プロセッサ数分のビットマップとして
+ *      実装できるのは，「同一intnoの割込みハンドラが同一コアで多重に
+ *      走ることはない」からである．doc/porting.txt:790,807の割込み出入口
+ *      処理（*f）は，受け付けた割込みの処理中は割込み優先度マスクを
+ *      その割込みの優先度に設定し（同一intno＝同一優先度の再入を含めて
+ *      マスクする），出口でのみ元へ戻す．したがって同一コアでは
+ *      _kernel_inthdr_<intno>（＝call_isr）が自分自身に多重に入ることは
+ *      なく，1コアにつき「実行中／非実行中」の1状態しか要らない．
+ *
+ *  (4) ISR本体からの復帰後のロック状態の復元はcall_cyclic（cyclic.c:541-549）
+ *      と同じ3分岐である．sense_lock()が真のときはCPUロック状態のままなので
+ *      lock_cpu()を呼んではならない．force_unlock_spinはスピンロックだけを
+ *      解放し，CPUロック状態には触らない（spin_lock.c:162-176）．
+ *
+ *  (5) ★走査の終了時は必ずCPUロック解除状態で戻る．インライン連鎖は
+ *      ロック復元コードをISRとISRの間にしか置かない（interrupt.trb:613の
+ *      「index > 0」）ため，最後のISRがCPUロックしたまま戻るとそのロックが
+ *      割り込まれたタスクへ漏れる．キュー方式ではこれが起きない．この差が
+ *      及ぶのはENA_DYNISRされた割込み番号だけである．
  */
 void
 call_isr(ISRQCB *p_isr_queue)
 {
-	QUEUE	*p_queue;
-	ISRCB	*p_isrcb;
+	PCB			*p_my_pcb = get_my_pcb();
+	QUEUE		*p_entry;
+	ISRCB		*p_isrcb;
+	ISRCB		*p_next;
+	PRI			cur_isrpri;
+	uint32_t	cur_isrseq;
+	bool_t		first;
+	ISR			isr;
+	EXINF		exinf;
+	uint_t		my_bit;
 
-	for (p_queue = p_isr_queue->isr_queue.p_next;
-							p_queue != &(p_isr_queue->isr_queue);
-							p_queue = p_queue->p_next) {
-		p_isrcb = (ISRCB *) p_queue;
-		LOG_ISR_ENTER(ISRID(p_isrcb));
-		(*(p_isrcb->p_isrinib->isr))(p_isrcb->p_isrinib->exinf);
-		LOG_ISR_LEAVE(ISRID(p_isrcb));
+	assert(sense_context(p_my_pcb));
+	assert(!sense_lock());
 
-		if (p_queue->p_next != &(p_isr_queue->isr_queue)) {
-			/* ISRの呼出し前の状態に戻す */
-			if (sense_lock()) {
-				unlock_cpu();
+	/*
+	 *  割込みハンドラは他のプロセッサへマイグレートしないので，CPUロック
+	 *  状態にする前に自プロセッサのPCBを取得してよい（interrupt.trb:607-609
+	 *  の既存コメントと同じ根拠）．
+	 */
+	my_bit = (1U << get_my_prcidx());
+
+	lock_cpu();
+	acquire_glock();
+
+	first = true;
+	cur_isrpri = 0;
+	cur_isrseq = 0U;
+
+	for (;;) {
+		/*
+		 *  (isrpri, isrseq)がcurより大きい最小の要素を求める．キューは
+		 *  この順序で昇順に保たれているので，先頭から見て最初に条件を
+		 *  満たした要素が答えである．
+		 */
+		p_next = NULL;
+		for (p_entry = p_isr_queue->isr_queue.p_next;
+								p_entry != &(p_isr_queue->isr_queue);
+								p_entry = p_entry->p_next) {
+			p_isrcb = ((ISRCB *) p_entry);
+			if (first || ISR_KEY_GT(p_isrcb->p_isrinib->isrpri,
+									p_isrcb->isrseq,
+									cur_isrpri, cur_isrseq)) {
+				p_next = p_isrcb;
+				break;
 			}
 		}
+		if (p_next == NULL) {
+			break;
+		}
+
+		cur_isrpri = p_next->p_isrinib->isrpri;
+		cur_isrseq = p_next->isrseq;
+		first = false;
+
+		/*
+		 *  ジャイアントロックを外している間にISRINIBが書き換わることは
+		 *  ないが（acre_isrはfree-listから取り出したISRCBのINIBしか触らず，
+		 *  このISRCBはrunningが立っている間free-listへ戻らない），
+		 *  dcreと同じくローカルへコピーしてから呼ぶ．
+		 */
+		isr = p_next->p_isrinib->isr;
+		exinf = p_next->p_isrinib->exinf;
+		p_next->running |= my_bit;
+
+		LOG_ISR_ENTER(ISRID(p_next));
+		release_glock();
+		unlock_cpu();
+
+		(*isr)(exinf);
+
+		LOG_ISR_LEAVE(ISRID(p_next));
+
+		/*  ISRの呼出し前の状態に戻す（call_cyclic と同じ3分岐）  */
+		if (sense_lock()) {
+			force_unlock_spin(p_my_pcb);
+		}
+		else {
+			lock_cpu();
+		}
+		acquire_glock();
+
+		p_next->running &= ~my_bit;
 	}
+
+	release_glock();
+	unlock_cpu();
 }
 
 #endif /* TOPPERS_isrcal */
