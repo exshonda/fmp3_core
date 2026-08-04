@@ -86,7 +86,7 @@ task_term = ext_tsk.o ras_ter.o ena_ter.o dis_ter.o sns_ter.o ter_tsk.o
 semaphore = semini.o acre_sem.o del_sem.o sig_sem.o \
 		wai_sem.o pol_sem.o twai_sem.o ini_sem.o ref_sem.o
 
-eventflag = flgini.o flgcnd.o set_flg.o clr_flg.o \
+eventflag = flgini.o flgcnd.o acre_flg.o del_flg.o set_flg.o clr_flg.o \
 		wai_flg.o pol_flg.o twai_flg.o ini_flg.o ref_flg.o
 
 dataqueue = dtqini.o dtqenq.o dtqfenq.o dtqdeq.o dtqsnd.o dtqfsnd.o dtqrcv.o \

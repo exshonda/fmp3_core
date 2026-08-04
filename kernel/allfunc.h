@@ -145,6 +145,8 @@
 /* eventflag.c */
 #define TOPPERS_flgini
 #define TOPPERS_flgcnd
+#define TOPPERS_acre_flg
+#define TOPPERS_del_flg
 #define TOPPERS_set_flg
 #define TOPPERS_clr_flg
 #define TOPPERS_wai_flg

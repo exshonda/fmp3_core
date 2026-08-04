@@ -89,6 +89,9 @@
  */
 #define initialize_eventflag		_kernel_initialize_eventflag
 #define check_flg_cond				_kernel_check_flg_cond
+#define free_flgcb					_kernel_free_flgcb
+#define tmax_sflgid					_kernel_tmax_sflgid
+#define aflginib_table				_kernel_aflginib_table
 
 /*
  *  dataqueue.c

@@ -90,6 +90,9 @@
  */
 #undef initialize_eventflag
 #undef check_flg_cond
+#undef free_flgcb
+#undef tmax_sflgid
+#undef aflginib_table
 
 /*
  *  dataqueue.c
