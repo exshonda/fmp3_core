@@ -52,7 +52,10 @@
  *	(C) 送信待ちの E_DLT（満杯 dtq に snd_dtq で待つ TASK2・同一プロセッサ）と
  *	    受信待ちの E_DLT（空 dtq に rcv_dtq で待つ TASK3・別プロセッサ）の両方．
  *	    del_dtq が swait_queue と rwait_queue の両方を解放することの実証．
- *	(D) 滞留データの破棄：データを入れたまま del → 再 acre で空であること．
+ *	(D) del → 再 acre 後のキュー状態リセットの確認：データを入れたまま del →
+ *	    再 acre で count/head/tail が初期化されること（acre_dtq 側のリセットの
+ *	    実証であり，del_dtq 側の滞留データ破棄そのものは公開 API から観測不能
+ *	    なため判別できない — 既知の検査限界）．
  *	(E) pdq: acre → 優先度順配送 → maxdpri 検査（ロック内へ移した分岐）→
  *	    del → E_NOEXS ×8．VALID_DPRI による acre_pdq の E_PAR．
  *	(F) dtq のスロット枯渇 E_NOID／静的オブジェクトへの del が E_OBJ／
@@ -285,7 +288,12 @@ task1(EXINF exinf)
 	check_point(8);
 
 	/*
-	 *  5) 滞留データの破棄
+	 *  5) del → 再 acre 後のキュー状態リセットの確認
+	 *
+	 *  ※本検査が実証するのは「再 acre 時に acre_dtq がキュー状態
+	 *    （count/head/tail）を初期化すること」である。del_dtq 側の滞留データ
+	 *    破棄そのものは公開 API から観測不能（count が全読出しをゲートする）
+	 *    ため、本検査では判別できない — 既知の検査限界として記録。
 	 */
 	cdtq.dtqcnt = 2U;
 	erid = acre_dtq(&cdtq);
@@ -295,13 +303,13 @@ task1(EXINF exinf)
 	check_ercd(psnd_dtq(dtqid1, 0xD2), E_OK);
 	check_ercd(ref_dtq(dtqid1, &rdtq), E_OK);
 	check_assert(rdtq.sdtqcnt == 2U);
-	check_ercd(del_dtq(dtqid1), E_OK);			/*  滞留データごと削除  */
+	check_ercd(del_dtq(dtqid1), E_OK);			/*  滞留データを持ったまま削除  */
 
 	erid = acre_dtq(&cdtq);
 	check_assert(erid > DTQ1);
 	dtqid2 = (ID) erid;
 	check_ercd(ref_dtq(dtqid2, &rdtq), E_OK);
-	check_assert(rdtq.sdtqcnt == 0U);			/*  ★滞留データは破棄されている  */
+	check_assert(rdtq.sdtqcnt == 0U);			/*  ★acre_dtq がcountを初期化する（del側の破棄は本検査では判別不能）  */
 	check_ercd(prcv_dtq(dtqid2, &data), E_TMOUT);
 	check_ercd(del_dtq(dtqid2), E_OK);
 	check_point(9);
