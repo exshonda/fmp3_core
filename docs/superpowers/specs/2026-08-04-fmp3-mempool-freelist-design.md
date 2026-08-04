@@ -220,6 +220,33 @@ typedef struct data_management_block {
 実測は現行テスト体制に無い（dcre 機能テストは musca/kria_r5 系で実行）
 ことを既知の未実測事項として記録する。
 
+**【裁定 2026-08-04・最終レビュー】計画 spec-issue 3 — FREEBLK はみ出し論証の
+末尾（プール終端）の穴**: 上記のはみ出し論証（「次の割付けのヘッダ直前の
+死領域に収まる」）は「次の割付けが存在する」ことを暗黙に仮定しており、
+プール終端（`limit`）の扱いを別途検証していなかった。自動生成プール
+（`kernel.py` の `ROUND_MB_T`）は `sizeof(MB_T)` の倍数に丸められるため
+安全だが、**ユーザ供給 `mpk`**（`DEF_MPK` の `mpk` 引数）は
+`CHECK_MB_ALIGN`（=4、`kernel/kernel.py:813`）にしか丸められておらず、
+64bit ターゲット（arm64、`sizeof(MPHDR)==8`）では `mpksz ≡ 4 (mod 8)`
+になりうる。この場合，丸め無しでは `limit` ちょうどの位置に 4B 割付け
+（`sizeof(MPFMB)*1`）が着地でき（`size > limit - aligned` の等号側で
+通過），解放時の 8B の `FREEBLK` 書込みが `limit` を 4B 越えてプール外
+（他のカーネル構造体やスタック等）を破壊しうる——実装計画レビューで
+発見。**解決（構造的な修正、Task 1 fix round で実装）**:
+`initialize_mempool` で `limit` を `sizeof(MPHDR)` の倍数へ切り下げる
+（`uintptr_t` 算術，`& ~(sizeof(MPHDR)-1)`）。導出：`alloc_mempool` が
+生成するすべてのユーザ領域先頭は `sizeof(MPHDR)` の倍数（§3 上記の
+アラインメント論証）であり，`limit` も `sizeof(MPHDR)` の倍数なら
+`user < limit` から `limit - user >= sizeof(MPHDR)`，すなわち
+`user + sizeof(MPHDR) <= limit` が常に成り立つ——これは「次の割付けの
+ヘッダが存在するか」に依存しない構造的な保証であり，末尾ケースを
+含めてはみ出しが必ずプール内に収まることを閉じる。丸めに伴い，
+`initialize_mempool` の最小サイズ検査も丸め後の実効容量で判定するよう
+一致させた（丸め前の `size` でなく `limit - mempool >= sizeof(MEMPOOLCB)`）。
+在来の挙動は不変：既存の全 `MPK_SIZE` 値・自動生成プールはすでに
+`sizeof(MB_T)`（したがって `sizeof(MPHDR)`）の倍数に整列済みのため，
+この丸めで実効容量が変わらない（ROM 差分は丸め判定コード自体のみ）。
+
 **サイズ0の割付**: `size==0` の malloc_mpk 呼出しがもし発生すると、
 ユーザ領域が0バイトになり `FREEBLK` を書き込む場所が無くなる。現行の
 呼出し側（6箇所）を確認した限り、`dtqcnt`/`pdqcnt`/`blkcnt`/`blksz`
@@ -483,6 +510,14 @@ typedef struct data_management_block {
 - **ROM/RAM 増分**: 生存割付あたり `+sizeof(size_t)`（ヘッダ）、プール
   あたり `+sizeof(void*)`（`MEMPOOLCB.freelist`）。実測は §7.4 のA/B
   比較で行う。
+- **（記録のみ・修正しない）`MEMPOOLCB` 自身のアラインメント**: 4-aligned
+  なユーザ供給 `mpk` ベース番地（64bit ターゲット、`CHECK_MB_ALIGN`=4 が
+  `sizeof(void*)`=8 未満）では、`MEMPOOLCB`（プール先頭に直置きされる、
+  `brk`/`limit`/`freelist` の3ポインタメンバを持つ）自身が誤アライン
+  になりうる。これは freelist 化で新たに生じた問題ではなく、
+  `MEMPOOLCB` をプール先頭に直置きする配置自体が dcre の原形から
+  継承した既存パターンであり、本 spec のスコープ外として修正しない
+  （2026-08-04 最終レビューで指摘・記録のみ）。
 
 ---
 

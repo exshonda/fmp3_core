@@ -664,7 +664,7 @@ bss は Task 3 完了時点（`ISRCB`/`free_isrcb` 等のデータ構造確定�
 |---|---|---|
 | a | `arch/arm_m_gcc/common/core_kernel_impl.h` の `TSKINICTXB` メンバコメントが `stk_top`/`stk_bottom` の意味を実際と逆に記述している | 未報告（コメント修正のみで pristine コードは無改変） |
 | b | `arch/arm_m_gcc/common/core_rename.def` に `sense_lock`/`unlock_cpu` のリネームエントリが無く，多重ISR連鎖を含むテスト（`test_int2` 等）が musca_b1 でリンク不能（`main` でも再現確認済み） | 本ブランチでは段階2で修正済み（`DIVERGENCE_MAP.md`）。上流へは未報告 |
-| c | `kernel/startup.c` 移植元の `malloc_mempool`/`aligned_alloc_mempool` が持つ符号混在比較（`(ptrdiff_t) >= (size_t)`）。dcre 現行ソースとバイト一致＝上流由来のバグ。misaligned な非NULL `mpk` で境界外「成功」の可能性がある | 未報告・未修正 |
+| c | `kernel/startup.c` 移植元の `malloc_mempool`/`aligned_alloc_mempool` が持つ符号混在比較（`(ptrdiff_t) >= (size_t)`）。dcre 現行ソースとバイト一致＝上流由来のバグ。misaligned な非NULL `mpk` で境界外「成功」の可能性がある | 本ブランチでは修正済み（fb5e369）・上流へは未報告 |
 | d | dcre 自身の `del_flg`/`del_dtq` が，兄弟関数（`del_sem`/`del_mtx`/`del_pdq`/`del_mpf`）と異なり `CHECK_PAR`（`E_PAR`）を使っている（本来は `CHECK_ID`/`E_ID` であるべき）。証拠は行番号つきで完備 | 未報告（FMP3 版は§9.1のとおり統一済み） |
 
 候補 b は本ブランチ内では既に修正済みだが，「pristine 側の既存ギャップ

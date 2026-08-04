@@ -468,7 +468,7 @@ ext_ker_handler(void)
  *
  *  ユーザ領域側を要求アラインメントに合わせ，ヘッダはその直前
  *  （ユーザ領域先頭 - sizeof(MPHDR)）に置く．ヘッダ自身のアラインメン
- *  トは，alignment が2の巾乗（呼出し側の責任）かつ alignof(size_t) 以
+ *  トは，alignment が2の巾乗（呼出し側の責任）かつ sizeof(size_t) 以
  *  上であることに依存して成立する（alloc_mempool 冒頭の assert と
  *  下の mphdr_size_check を参照）．
  */
@@ -515,6 +515,19 @@ typedef struct {
  *  この番地自体ははみ出し範囲の外）．よってはみ出しは必ず「自ユーザ
  *  領域末尾〜次ヘッダ直前の死領域（誰も読み書きしないパディング）」に
  *  収まり，他の生きたデータを壊さない．
+ *
+ *  ★プール末尾（次の割付けが存在しない場合）の扱い（2026-08-04 最終
+ *  レビューで発見・修正）：上の論証は「次の割付けのヘッダが存在する」
+ *  ことを前提にしており，このブロックがプール内で最後の（末尾に最も
+ *  近い）生存割付けである場合，はみ出しがプール自体の外（limit の外）
+ *  へ出ないことは別に保証しなければならない．これは「はみ出しの
+ *  ドキュメント上の論証」ではなく「initialize_mempool が limit を
+ *  sizeof(MPHDR) の倍数へ切り下げる」という**構造的な**保証で閉じて
+ *  いる（`initialize_mempool` 冒頭のコメント参照）．limit が
+ *  sizeof(MPHDR) の倍数で user（sizeof(MPHDR) の倍数）が limit 未満
+ *  なら limit - user >= sizeof(MPHDR)，すなわち user + sizeof(MPHDR)
+ *  <= limit が常に成り立つため，末尾ケースでも上と同じ結論（はみ出し
+ *  は limit の内側に収まる）が成立する．
  *  size == 0 の割付けは非対応（現行の全呼出し側は CHECK_PAR とあふれ
  *  検査により size > 0 を保証している．将来呼出し側を追加する場合は
  *  この不変を維持すること）．
@@ -541,10 +554,36 @@ bool_t
 initialize_mempool(MB_T *mempool, size_t size)
 {
 	MEMPOOLCB	*p_mempoolcb = ((MEMPOOLCB *) mempool);
+	uintptr_t	limit;
 
-	if (size >= sizeof(MEMPOOLCB)) {
+	/*
+	 *  ★2026-08-04 最終レビュー：limit を sizeof(MPHDR) の倍数へ切り下げ
+	 *  る（FREEBLK コメントの「はみ出しは死領域に収まる」という論証の
+	 *  前提を構造的に保証する）．自動生成プール（cfg の ROUND_MB_T）は
+	 *  すでに sizeof(MB_T) の倍数なのでこの丸めは無害だが，ユーザ供給
+	 *  mpk（`DEF_MPK` の mpk 引数）は CHECK_MB_ALIGN（4）にしか丸められ
+	 *  ておらず，64bit ターゲット（sizeof(MPHDR)==8）では mpksz ≡ 4
+	 *  (mod 8) になりうる．その場合，丸め無しでは limit ちょうどに
+	 *  4B 割付け（sizeof(MPFMB)*1）が着地し，解放時の FREEBLK 書込み
+	 *  （8B）が limit を 4B 越えてプール外を破壊しうる（実装計画レビュー
+	 *  で発見）．limit を切り下げることで，どのユーザ領域先頭も
+	 *  sizeof(MPHDR) の倍数（下の alloc_mempool 冒頭のコメント参照）
+	 *  であり limit も sizeof(MPHDR) の倍数になるため，
+	 *  user < limit ⟹ limit - user >= sizeof(MPHDR) ⟹
+	 *  user + sizeof(MPHDR) <= limit が常に成り立ち，はみ出しは必ず
+	 *  プール内に収まる．在来の挙動は不変：既存の全 MPK_SIZE 値・自動
+	 *  生成プールはすでに整列済みのため，この丸めで何も変わらない．
+	 */
+	limit = (((uintptr_t) mempool) + ((uintptr_t) size))
+			& ~((uintptr_t)(sizeof(MPHDR) - 1U));
+
+	/*
+	 *  丸め後の limit が MEMPOOLCB を保持できるかで検査する（丸め前の
+	 *  size でなく，丸め後の実効容量で判定を一致させる）．
+	 */
+	if (limit >= (((uintptr_t) mempool) + sizeof(MEMPOOLCB))) {
 		p_mempoolcb->brk = ((char *) mempool) + sizeof(MEMPOOLCB);
-		p_mempoolcb->limit = ((char *) mempool) + size;
+		p_mempoolcb->limit = ((void *) limit);
 		p_mempoolcb->count = 0;
 		p_mempoolcb->freelist = NULL;
 		return(true);
@@ -594,7 +633,7 @@ initialize_mempool(MB_T *mempool, size_t size)
  *
  *  alignmentは2の巾乗であること（呼出し側の責任．alignof(MB_T)ないし
  *  aligned_alloc_mpkの引数）．加えてヘッダ直前配置のアラインメント成立性
- *  のため alignment >= alignof(size_t) であること（現行の全呼出し側で成立
+ *  のため alignment >= sizeof(size_t) であること（現行の全呼出し側で成立
  *  することをコード読解で確認済み．冒頭のassertはこの前提の防御である）．
  */
 Inline void *
@@ -659,10 +698,10 @@ alloc_mempool(MEMPOOLCB *p_mempoolcb, size_t alignment, size_t size)
 
 	/*
 	 *  ヘッダをユーザ領域の直前に書き，要求サイズを記録する．
-	 *  aligned は alignment の倍数，alignment は alignof(size_t) 以上
+	 *  aligned は alignment の倍数，alignment は sizeof(size_t) 以上
 	 *  の2の巾乗（冒頭の assert），sizeof(MPHDR) == sizeof(size_t)
 	 *  （mphdr_size_check）なので，aligned - sizeof(MPHDR) も
-	 *  alignof(size_t) の倍数であり，この書込みは常にアラインする．
+	 *  sizeof(size_t) の倍数であり，この書込みは常にアラインする．
 	 */
 	p_mphdr = ((MPHDR *)(aligned - ((uintptr_t) sizeof(MPHDR))));
 	p_mphdr->size = size;
