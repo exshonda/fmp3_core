@@ -39,7 +39,7 @@
 
 ## 1. プール裁定（段階1最終レビュー Important #1 の宿題 — ユーザ承認済み 2026-08-04）
 
-**裁定: 受容継続。** 根拠:
+**裁定: 受容継続。** 根拠 （malloc_mempool は bump allocator で count==0 のときだけ brk を戻す）:
 
 1. **3b の管理領域は構造的にウィンドウ・フリー**である。dtq/pdq/mpf の管理領域
    （p_dtqmb/p_pdqmb/p_mpfmb・mpf ブロック領域）はカーネルが **giant lock 下でのみ**
@@ -61,29 +61,27 @@
 
 ```c
 typedef struct t_cdtq {
-	ATR			dtqatr;		/* データキュー属性 */
-	uint_t		dtqcnt;		/* データキューの容量 */
-	void		*dtqmb;		/* データキュー管理領域の先頭番地 */
+	ATR		dtqatr;		/* データキュー属性 */
+	uint_t	dtqcnt;		/* データキュー管理領域に格納できるデータ数 */
+	void	*dtqmb;		/* データキュー管理領域の先頭番地 */
 } T_CDTQ;
 
 typedef struct t_cpdq {
-	ATR			pdqatr;		/* 優先度データキュー属性 */
-	uint_t		pdqcnt;		/* 優先度データキューの容量 */
-	PRI			maxdpri;	/* データ優先度の最大値 */
-	void		*pdqmb;		/* 優先度データキュー管理領域の先頭番地 */
+	ATR		pdqatr;		/* 優先度データキュー属性 */
+	uint_t	pdqcnt;		/* 優先度データキュー管理領域に格納できるデータ数 */
+	PRI		maxdpri;	/* 優先度データキューに送信できるデータ優先度の最
+						   大値 */
+	void	*pdqmb;		/* 優先度データキュー管理領域の先頭番地 */
 } T_CPDQ;
 
 typedef struct t_cmpf {
-	ATR			mpfatr;		/* 固定長メモリプール属性 */
-	uint_t		blkcnt;		/* 獲得できる固定長メモリブロックの数 */
-	uint_t		blksz;		/* 固定長メモリブロックのサイズ */
-	MPF_T		*mpf;		/* 固定長メモリプール領域の先頭番地 */
-	void		*mpfmb;		/* 固定長メモリプール管理領域の先頭番地 */
-}T_CMPF;
+	ATR		mpfatr;		/* 固定長メモリプール属性 */
+	uint_t	blkcnt;		/* 獲得できる固定長メモリブロックの数 */
+	uint_t	blksz;		/* 固定長メモリブロックのサイズ */
+	MPF_T	*mpf;		/* 固定長メモリプール領域の先頭番地 */
+	void	*mpfmb;		/* 固定長メモリプール管理領域の先頭番地 */
+} T_CMPF;
 ```
-
-（正確なフィールド・コメントは dcre 現物から転写。上記は調査時点の要旨 —
-実装前確認§8-1 で dcre とバイト照合すること。）
 
 ### 2.2 サービスコール
 
@@ -100,18 +98,21 @@ TFN コードの既存有無は実装前確認（3a では6個とも既存だっ
 
 ### 2.3 確保とエラー（dcre 準拠）
 
-- `acre_dtq`: 検査（dtqatr・dtqcnt 範囲は dcre の式）→ E_NOID（free-list 空を先に）→
-  dtqcnt > 0 なら `p_dtqmb = malloc_mpk(sizeof(DTQMB) * dtqcnt)`、NULL なら E_NOMEM、
-  成功なら `dtqatr |= TA_MBALLOC`。dtqcnt==0 の扱い（管理領域不要のはず）と
-  ユーザ供給 dtqmb（T_CDTQ.dtqmb != NULL）の dcre での扱いは実装前確認§8-2。
-- `acre_pdq`: 同型（`sizeof(PDQMB) * pdqcnt` + maxdpri 検査）。
+- `acre_dtq`: 検査（dtqatr、ユーザ供給 dtqmb != NULL のときは MB_ALIGN）→ E_NOID（free-list 空を先に）→
+  dtqcnt != 0 && p_dtqmb == NULL なら `p_dtqmb = malloc_mpk(sizeof(DTQMB) * dtqcnt)`、NULL なら E_NOMEM、
+  成功なら `dtqatr |= TA_MBALLOC`。dtqcnt==0 のとき管理領域は確保しない。
+- `acre_pdq`: 同型（`sizeof(PDQMB) * pdqcnt`）。加えて `CHECK_PAR(VALID_DPRI(maxdpri))`
+  （VALID_DPRI は FMP3 の `kernel/check.h` へ追加）。
 - `acre_mpf`: **2段確保**。①mpf==NULL なら `malloc_mpk(ROUND_MPF_T(blksz) * blkcnt)` +
   `TA_MEMALLOC`（NULL なら E_NOMEM）②管理領域 `malloc_mpk(sizeof(MPFMB) * blkcnt)` +
-  `TA_MBALLOC`（NULL なら **①で確保した分を free_mpk してから** E_NOMEM — 巻き戻しの
-  有無と順序は dcre 現物照合、実装前確認§8-3）。
+  `TA_MBALLOC`（NULL なら **①で確保した分を free_mpk してから** E_NOMEM。巻き戻し条件は
+  `pk_cmpf->mpf == NULL`）。検査は `CHECK_PAR(blkcnt != 0)`・`CHECK_PAR(blksz != 0)`・
+  ユーザ供給 mpf != NULL のとき `CHECK_PAR(MPF_ALIGN(mpf))`・ユーザ供給 mpfmb != NULL のとき
+  `CHECK_PAR(MB_ALIGN(p_mpfmb))`。INIBに格納する blksz は `ROUND_MPF_T(blksz)`。
 - `del_*`: E_NOEXS → E_OBJ（静的）→ 両待ちキュー（dtq/pdq は swait+rwait、mpf は
-  wait_queue のみ）を init_wait_queue で E_DLT 解放 → TA_MBALLOC なら管理領域 free_mpk、
-  mpf は TA_MEMALLOC ならブロック領域も free_mpk → TA_NOEXS → free-list。
+  wait_queue のみ）を init_wait_queue で E_DLT 解放 → TA_MEMALLOC なら mpf ブロック領域 free_mpk →
+  TA_MBALLOC なら管理領域 free_mpk → **属性を読んでから** TA_NOEXS に書き込む
+  （TA_NOEXS は全ビット 1 なので、先に属性を読んでから書き込む必要がある） → free-list。
   滞留データ（dtq の未受信データ）は破棄される（dcre 意味論 — テストで実証）。
 
 ## 3. cfg 層
@@ -126,18 +127,30 @@ TFN コードの既存有無は実装前確認（3a では6個とも既存だっ
 
 ## 4. カーネル層
 
-- `TA_MBALLOC` を kernel_impl.h へ（`#ifndef` ガード付き `UINT_C(0x4000)`、
-  TA_MEMALLOC の隣）。
+- `TA_MBALLOC` を kernel_impl.h へ（Task 2 に置くのは依存の衛生が理由。cfg は今日すでに
+  DTQMB/PDQMB/MPFMB/MPF_T/COUNT_MPF_T を出力し、コンパイルが通っている。TA_MBALLOC は
+  cfg の出力トークンではなく、Task 2 で Task 1 の結果に対する「後付けの属性セット」であり、
+  cfg グラフへの入力ではない）。
 - free_dtqcb/free_pdqcb/free_mpfcb、initialize_* の動的スロット節（master-only 内・
-  非親和）、DTQID/PDQID/MPFID の2レンジ置換、E_NOEXS 23関数
-  （dataqueue.c 9: snd/psnd/tsnd/fsnd/rcv/prcv/trcv/ini/ref_dtq、
-  pridataq.c 8: snd/psnd/tsnd/rcv/prcv/trcv/ini/ref_pdq、
-  mempfix.c 6: get/pget/tget/rel/ini/ref_mpf）— すべて 3a の型どおり。
+  非親和）、DTQID/PDQID/MPFID の2レンジ置換。
+- **E_NOEXS 23関数の構造変更**: dataqueue.c 9・pridataq.c 8・mempfix.c 6。
+  このうち **5関数は lock_cpu 前に p_xxxinib を読むため構造変更が必須**：
+  - `fsnd_dtq`（dataqueue.c:485）: CHECK_ILUSE が p_dtqcb->p_dtqinib->dtqcnt を読む
+  - `snd_pdq`（pridataq.c:301）: CHECK_PAR が p_pdqcb->p_pdqinib->maxdpri を読む
+  - `psnd_pdq`（pridataq.c:357）: CHECK_PAR が p_pdqcb->p_pdqinib->maxdpri を読む
+  - `tsnd_pdq`（pridataq.c:408）: CHECK_PAR が p_pdqcb->p_pdqinib->maxdpri を読む
+  - `rel_mpf`（mempfix.c:324-330）: CHECK_PAR が p_mpfcb->p_mpfinib fields を読む
+  
+  → 各関数が lock_cpu/lock_cpu_dsp の外で p_xxxinib にアクセスしていることを
+  現物で確認し、ロック取得後に検査を移すか、ロック前に読んだ値を再確認してから
+  使用する。段階1 E_DLT ガード(`dele_tsk` で `winfo.dtqid` を wait 解放前に cond check)
+  と同型の防御。
 - 配線: allfunc.h 6行・Makefile.kernel・kernel_rename.def + 再生成。
 
 ## 5. MP 安全性
 
 - §1 の裁定どおり: 管理領域はウィンドウ・フリー（glock 下参照のみ + E_NOEXS ゲート）。
+  malloc_mempool は bump allocator で count==0 のときだけ brk を戻す。
   spec として明示し、最終レビューで反証を試みる。
 - E_DLT 解放・ディスパッチ尻尾は 3a と同じ既存機構（init_wait_queue / ini_* の型）。
 - acre_* の E_NOMEM 巻き戻し経路で free-list の一貫性が保たれること（TCB 相当の
@@ -145,6 +158,13 @@ TFN コードの既存有無は実装前確認（3a では6個とも既存だっ
   dcre 現物の順序を実装前確認§8-4 で確定）。
 
 ## 6. テスト（test_dcre4、musca_b1-2core、AID_DTQ(2)/AID_PDQ(1)/AID_MPF(1) + DEF_MPK）
+
+**テスト編成**: `TASK1`=MID/PRC1、`TASK2`=HIGH/PRC1、`TASK3`=HIGH/PRC2。
+**静的テストオブジェクト**: `DTQ1`（データキュー）・`PDQ1`（優先度データキュー）・
+`MPF1`（固定長メモリプール）。`MPK_SIZE` は段階1 + 動的スロット用追加サイズ
+（Task 6 で確定）。
+
+**テスト項目**:
 
 1. acre_dtq → snd/rcv の実通信（データ整合）→ del → E_NOEXS
 2. **E_NOMEM 実証**: プールに入らない dtqcnt で acre_dtq → E_NOMEM
@@ -157,12 +177,16 @@ TFN コードの既存有無は実装前確認（3a では6個とも既存だっ
    mpf の E_NOMEM（ブロック領域が入らない blksz*blkcnt）
 7. 枯渇 E_NOID・静的 E_OBJ・決定形の同一 ID 再 acre
 8. カーネル変異 negative control（del_dtq の free-list 返却）
+   
+   **プール再利用の実証**: malloc_mempool の bump 特性（count==0 で brk リセット）により
+   連続した acre/del サイクルで同一メモリ領域が再利用されることを確認。
+   
 9. 非退行: test_dcre1/2/3・test_dcre_mix・test_int2
 
 ## 7. 統治
 
-- 8タスク構成（3a と同型: 実装前確認 → cfg → dtq → pdq → mpf → test_dcre4 →
-  最終回帰。hardening 枠は無いので7タスク構成でも可 — 計画で確定）。
+- **7タスク構成**（実装前確認 → cfg → dtq → pdq → mpf → test_dcre4 → 最終回帰。
+  段階2 hardening のような別枠が無いため）。
 - 全 pristine 編集は DIVERGENCE_MAP。上流報告候補は従来4件のまま。
 
 ## 8. 実装前確認リスト（計画 Task 1 で現物確認）
@@ -177,3 +201,146 @@ TFN コードの既存有無は実装前確認（3a では6個とも既存だっ
 7. DTQMB/PDQMB/MPFMB 型と COUNT/ROUND 系マクロの FMP3 既存有無
    （段階1 COUNT_MB_T の教訓 — cfg が出力するなら定義側も要確認）
 8. no-static 回帰 cfg の include 構成（隠れ静的インスタンスの有無を全 syssvc/target で確認）
+
+---
+
+## 9. 実装前確認の結果（2026-08-04 実測）
+
+### 確認概要
+
+**ゲート条件**: すべてクリア ✅
+
+1. iprcid/affinity/p_pcb が INIB/CB に存在しない
+2. initialize_dataqueue/initialize_pridataq/initialize_mempfix がマスタプロセッサ限定
+3. CB の先頭フィールドが QUEUE（型 punning OK）
+4. dcre の del_* が TA_NOEXS 書込みを free_mpk より後に実施
+
+**訂正適用状況**: 訂正 A〜H をすべて spec に反映済み
+
+### TFN コード（既存値）
+
+| コード | 値 |
+|--------|-----|
+| TFN_ACRE_DTQ | -196 |
+| TFN_ACRE_PDQ | -197 |
+| TFN_ACRE_MPF | -201 |
+| TFN_DEL_DTQ | -212 |
+| TFN_DEL_PDQ | -213 |
+| TFN_DEL_MPF | -217 |
+
+### DTQID/PDQID/MPFID の現行実装
+
+- **マクロ形式**: inib ポインタ差分式（既存・2レンジ化済み）
+- **CB テーブル**: ポインタ表（`DTQCB *const p_dtqcb_table[]` など）
+- **tnum_* 位置**: `.c` ファイルで定義（`.h` への移設が必須）
+- **queue.h include**: 3つの `.h` ファイル `:51` に既存
+
+### dcre 転写元の行範囲（後続 Task 参照用）
+
+| 関数 | ファイル | 範囲 |
+|------|---------|------|
+| acre_dtq | dataqueue.c | 339-397 |
+| del_dtq | dataqueue.c | 402-444 |
+| acre_pdq | pridataq.c | 316-379 |
+| del_pdq | pridataq.c | 384-426 |
+| acre_mpf | mempfix.c | 199-279 |
+| del_mpf | mempfix.c | 284-328 |
+
+### E_NOEXS 23 関数と構造変更 5 関数
+
+**23 関数の内訳**:
+- dataqueue.c: snd_dtq(313) psnd_dtq(367) tsnd_dtq(417) fsnd_dtq(474) rcv_dtq(521) prcv_dtq(578) trcv_dtq(622) ini_dtq(683) ref_dtq(727)
+- pridataq.c: snd_pdq(290) psnd_pdq(345) tsnd_pdq(396) rcv_pdq(455) prcv_pdq(513) trcv_pdq(557) ini_pdq(619) ref_pdq(663)
+- mempfix.c: get_mpf(173) pget_mpf(222) tget_mpf(257) rel_mpf(311) ini_mpf(370) ref_mpf(413)
+
+**構造変更が必要な 5 関数**（lock_cpu より前に p_xxxinib を読む）:
+
+| 関数 | ファイル | 行 | 読む対象 |
+|------|---------|-----|----------|
+| fsnd_dtq | dataqueue.c | 485 | p_dtqcb->p_dtqinib->dtqcnt (CHECK_ILUSE) |
+| snd_pdq | pridataq.c | 301 | p_pdqcb->p_pdqinib->maxdpri (CHECK_PAR) |
+| psnd_pdq | pridataq.c | 357 | p_pdqcb->p_pdqinib->maxdpri (CHECK_PAR) |
+| tsnd_pdq | pridataq.c | 408 | p_pdqcb->p_pdqinib->maxdpri (CHECK_PAR) |
+| rel_mpf | mempfix.c | 324-330 | p_mpfcb->p_mpfinib fields (CHECK_PAR ×5) |
+
+**FMP3 固有関数**: 段階2 の `msta_cyc`/`msta_alm` に相当するものは dtq/pdq/mpf には **無し**（上流に先例なし）
+
+### acre_*/del_* の順序確認
+
+**acre_* の確保順序**（dcre 忠実）:
+1. 検査
+2. `lock_cpu()`
+3. **E_NOID**（tnum_* == 0 || queue_empty） ← 最初
+4. 管理領域の malloc_mpk
+5. NULL なら E_NOMEM → **E_NOMEM のとき free-list は 1 要素も減らない**（段階1 acre_tsk と同型）
+6. 確保成功後に CB pop
+
+**del_* の属性読み書き順序**（TA_NOEXS は全ビット 1）:
+1. E_NOEXS チェック
+2. E_OBJ チェック（静的）
+3. 待ちキュー E_DLT 解放
+4. **属性を読む** （TA_MBALLOC/TA_MEMALLOC ビット判定）
+5. free_mpk
+6. **属性を TA_NOEXS に書き込む** ← 読みが先
+
+### no-static 回帰 cfg 構成
+
+**静的 CRE_DTQ/PDQ/MPF を含む cfg**（7 本）:
+- sample/sample1.cfg（CRE_DTQ のみ）
+- target/polarfire_soc_kit_gcc/softconsole/sample1/sample1.cfg
+- test/perf2.cfg
+- test/test_dtq1.cfg
+- test/test_mpf1.cfg
+- test/test_notify1.cfg
+- test/test_pdq1.cfg
+
+**含まない cfg**:
+- syssvc/*.cfg（すべて）
+- test/test_common1.cfg
+
+**判定**: 段階3a serial.cfg 教訓（回避が必要）は **dtq/pdq/mpf では不要**。3 件とも `INCLUDE("test/test_common1.cfg")` で可（flg/mtx 型）。Task 2 Step 12 で E_OBJ が実測確認できれば確定。
+
+### cfg 共通枠組みの per-object 変更確認
+
+**DataqueueObject/PridataqObject/MempfixObject** の実装:
+- 共通枠組み（KernelObject）を継承
+- `prepare`・`generateInib` のみカスタマイズ
+- `inibList`/`omit_cb`/`generateData` は既定のまま（変更ゼロ）
+
+**判定**: per-object テンプレートの変更ゼロ。編集したくなったら共通枠組みの理解誤りの合図。
+
+### initialize_* 関数の確認
+
+**3 関数すべてが master-only**:
+```c
+if (p_my_pcb->prcid == TOPPERS_MASTER_PRCID) { ... }
+```
+
+**INIB のプロセッサ親和なし**: iprcid/affinity/p_pcb なし
+
+**新規の解除機構不要**: 既存 `init_wait_queue` (wait.c:215-228 MP 対応済み) を使用
+
+**判定**: 静的ループ境界と動的スロット節を追加するのみ。プロセッサフィルタ新設なし。
+
+### 型・マクロの FMP3 既存有無確認
+
+**すべて既存** ✅:
+- DTQMB/PDQMB/MPFMB 構造体
+- MPF_T・COUNT_MPF_T・ROUND_MPF_T マクロ
+- MPF_ALIGN・MB_ALIGN・INDEX_NULL・INDEX_ALLOC マクロ
+- TA_NOEXS・TA_MEMALLOC 属性値
+
+**TA_MBALLOC**: cfg 出力トークンではない。Task 2 置き（依存衛生）。
+
+### malloc_mempool の bump 特性
+
+**根拠**: count==0 のときだけ brk を戻す（段階1 §1 裁定の帰結）
+
+**3点での記載**: §1 根拠追記・§5 MP 安全性に明記・§6 テスト 8 番項目に実証追加
+
+---
+
+**実装前確認状況**: **PASS** ✅  
+**ゲート条件**: **すべてクリア** ✅  
+**訂正状況**: **A〜H すべて反映完了** ✅  
+**後続 Task への記録**: 本セクション 9 が基盤
