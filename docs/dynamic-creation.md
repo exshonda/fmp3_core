@@ -39,13 +39,12 @@ FMP3（マルチプロセッサ対応 TOPPERS カーネル）に，ASP3 の dcre
 実装は5段階に分けて進めた：段階1（タスク＋`DEF_MPK`）→段階2（周期通知／
 アラーム通知）→段階3a（セマフォ／イベントフラグ／ミューテックス）→段階3b
 （データキュー／優先度データキュー／固定長メモリプール）→ ISR（専用計画）。
-2026-08-04 時点で全段階が実装・テスト・台帳記録まで完了しており（commit
-`e906805` が現在の branch HEAD），**dcre 標準の動的生成オブジェクトは ISR を
-含めて全種類が揃っている**。ただし ISR 段階は他段階と異なり，段階完了時の
-「最終回帰・台帳整理」コミット（段階3a/3b でいう `e1ac2c3`/`817b1d8` 相当）が
-まだ作成されておらず，フラット台帳 `.superpowers/sdd/progress.md` にも ISR 段階
-の完了サマリはまだ転記されていない（作業記録は
-`.superpowers/sdd/2026-08-04-fmp3-dcre-isr/progress.md` 側にある）。
+**ISR 段階を含め全段階が Task 7 まで完了しており，全回帰がグリーンで
+フラット台帳 `.superpowers/sdd/progress.md` にも完了記録済みである
+（`.superpowers/sdd/2026-08-04-fmp3-dcre-isr/progress.md` に作業記録の
+詳細がある）。dcre 標準の動的生成オブジェクトは ISR を含めて全種類が
+揃っている。**本書はブランチ内でのみ管理するため，以後の更新でも
+特定コミットの SHA は追わない方針とする。
 
 設計書：
 - 段階1：`docs/superpowers/specs/2026-08-03-fmp3-dynamic-creation-design.md`
@@ -140,8 +139,8 @@ ISR だけは他オブジェクトと異なる二段構えになっている。`
 | `DEF_MPK` を 2 個以上 | 常に | `E_OBJ` |
 | `AID_ISR(n>0)` かつ `ENA_DYNISR` が 0 個 | 常に | `E_OBJ` |
 | `ENA_DYNISR(intno)` かつ静的 `CRE_ISR` が 0 個（cfg 全体で） | 常に | `E_OBJ` |
-| `ENA_DYNISR(intno)` に対応する `CFG_INT(intno)` が無い | 常に | cfg エラー |
-| `ENA_DYNISR(intno)` に `DEF_INH(intno)` が競合 | 常に | cfg エラー |
+| `ENA_DYNISR(intno)` に対応する `CFG_INT(intno)` が無い | 常に | cfg エラー `E_OBJ`（`kernel/interrupt.py:397-399`） |
+| `ENA_DYNISR(intno)` に `DEF_INH(intno)` が競合 | 常に | cfg エラー `E_OBJ`（`kernel/interrupt.py:414-422`） |
 
 参照：`kernel/kernel_api.def`（文法の実物），
 `docs/superpowers/specs/2026-08-03-fmp3-dynamic-creation-design.md` §3.2，
@@ -290,11 +289,14 @@ typedef struct t_cisr {
   いる intno。（dcre は「範囲外」と「表に無い」を区別するが，FMP3 では
   区別する手段が構造的に無い。§9 参照）。free-list 空なら `E_NOID`。
 - `del_isr`：**削除に前提条件は無い**（動作中の intno に紐づく ISR でも
-  削除できる）。**戻った時点で，対象 ISR は実行中でなく，以後実行されない**
-  ことを保証する（quiesce 方式）。他コアで当該 ISR 本体が実行中なら，
-  `del_isr` はその完了まで待ってから戻る。待ち時間は ISR 本体の実行時間で
-  有界（TOPPERS の「ISR は短時間で終える」規約に従う限り）。静的生成 ISR への
-  適用は `E_OBJ`。
+  削除できる）。**`del_isr` が E_OK を返した時点で，対象 ISR は実行中でなく，
+  以後実行されない**ことを保証する（quiesce 方式）。他コアで当該 ISR 本体が
+  実行中なら，`del_isr` はその完了まで待ってから戻る。待ち時間は ISR 本体の
+  実行時間で有界（TOPPERS の「ISR は短時間で終える」規約に従う限り）。
+  静的生成 ISR への適用は `E_OBJ`。**`E_NOEXS`（他タスクが削除中／削除済み）
+  で戻った場合にはこの保証は無い**——quiesce 完了を必要とする資源解放は，
+  `E_OK` を確認してから行うこと（`kernel/interrupt.c:665` 付近のコード側
+  コメントが正）。
 - `acre_isr`/`del_isr`とも **ISR コンテキストから呼び出すと `E_CTX`** になる
   （通常のサービスコールと同じ制約。`test_dcre5` の手順7で実証）。
 
@@ -530,20 +532,28 @@ CPU ロックを解放して待つ（`delay_for_interrupt()` を挟む `wait_tmo
 
 ディスパッチ経路・実行時挙動そのものは不変（`_kernel_inthdr_<intno>` は
 バイト単位で不変）であり，増えるのはデータと起動時 O(N) ループのみである
-ため受容している。**実測値**（`musca_b1-2core`，`AID_ISR`/`ENA_DYNISR` の
-実装導入前後）：
+ため受容している。**最終実測値**（`musca_b1-2core`，ISR段階 Task 7，
+`AID_ISR`/`ENA_DYNISR` の実装導入前 `f1f1d53` 後 HEAD 比較）：
 
 ```
-text 58960 → 59452（+492）／ data 32 → 32（+0）／ bss 24748 → 24820（+72）
+text +1796／ data +0／ bss +72
 ```
 
-（`.superpowers/sdd/2026-08-04-fmp3-dcre-isr/task-3-report.md` Step 9。
-+72 バイトは `ISRCB`×静的ISR数＋`QUEUE free_isrcb`，+492 バイトは
-`isrinib_table`/`isrorder_table`/`p_isrcb_table` のデータと
-`initialize_isr`/`enqueue_isr`/`search_isr_queue`/`call_isr` のコード本体で
-説明できる規模であることを確認済み）。他の `AID_*`（tsk/cyc/alm/sem/flg/mtx/
-dtq/pdq/mpf）は，`AID_*` を1個も書かない構成では出力が完全に不変である
-（各段階の「管理された差分」検査で確認済み）。
+（`DIVERGENCE_MAP.md` の「★ROM増分の最終確認（ISR段階 Task 7）」参照。
+bss は Task 3 完了時点（`ISRCB`/`free_isrcb` 等のデータ構造確定）から
+不変であり，Task 4（`call_isr` の MP対応版への全面書き直し）・Task 5
+（`acre_isr`/`del_isr` の追加）で増えた分はすべて text 側のコード本体で
+ある）。
+
+参考として，Task 3 完了時点（`call_isr` 暫定版のみ）の中間スナップショットは
+`text +492／ data +0／ bss +72` であった（型と初期化コード導入直後の値で，
+上記の最終値には含まれていない Task 4/5 分のコード増（+1304 text バイト）が
+後続する。`DIVERGENCE_MAP.md` の「★ROM増分の「後」実測（Task 3 Step 9）」
+参照）。
+
+他の `AID_*`（tsk/cyc/alm/sem/flg/mtx/dtq/pdq/mpf）は，`AID_*` を1個も
+書かない構成では出力が完全に不変である（各段階の「管理された差分」検査で
+確認済み）。
 
 ---
 
