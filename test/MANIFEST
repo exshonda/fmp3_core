@@ -44,6 +44,9 @@ test_dcre2.h
 test_dcre3.c
 test_dcre3.cfg
 test_dcre3.h
+test_dcre4.c
+test_dcre4.cfg
+test_dcre4.h
 test_dcre_mix.c
 test_dcre_mix.cfg
 test_dcre_mix.h
