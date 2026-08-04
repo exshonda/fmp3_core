@@ -83,7 +83,7 @@ task_sync = slp_tsk.o tslp_tsk.o wup_tsk.o can_wup.o \
 
 task_term = ext_tsk.o ras_ter.o ena_ter.o dis_ter.o sns_ter.o ter_tsk.o
 
-semaphore = semini.o sig_sem.o \
+semaphore = semini.o acre_sem.o del_sem.o sig_sem.o \
 		wai_sem.o pol_sem.o twai_sem.o ini_sem.o ref_sem.o
 
 eventflag = flgini.o flgcnd.o set_flg.o clr_flg.o \

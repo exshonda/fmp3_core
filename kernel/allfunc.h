@@ -133,6 +133,8 @@
 
 /* semaphore.c */
 #define TOPPERS_semini
+#define TOPPERS_acre_sem
+#define TOPPERS_del_sem
 #define TOPPERS_sig_sem
 #define TOPPERS_wai_sem
 #define TOPPERS_pol_sem

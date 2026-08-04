@@ -63,6 +63,9 @@ signal_time
 
 # semaphore.c
 initialize_semaphore
+free_semcb
+tmax_ssemid
+aseminib_table
 
 # eventflag.c
 initialize_eventflag

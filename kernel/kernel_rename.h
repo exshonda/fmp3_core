@@ -80,6 +80,9 @@
  *  semaphore.c
  */
 #define initialize_semaphore		_kernel_initialize_semaphore
+#define free_semcb					_kernel_free_semcb
+#define tmax_ssemid					_kernel_tmax_ssemid
+#define aseminib_table				_kernel_aseminib_table
 
 /*
  *  eventflag.c

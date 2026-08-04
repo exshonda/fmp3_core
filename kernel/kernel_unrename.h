@@ -81,6 +81,9 @@
  *  semaphore.c
  */
 #undef initialize_semaphore
+#undef free_semcb
+#undef tmax_ssemid
+#undef aseminib_table
 
 /*
  *  eventflag.c
