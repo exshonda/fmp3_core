@@ -496,6 +496,45 @@ task1(EXINF exinf)
 	cmpf.blksz = 32U;
 	check_assert(acre_mpf(&cmpf) == E_NOMEM);
 
+	/*
+	 *  ★2段確保の②で失敗したときの巻き戻し（段階3b Task 5 の未実証経路）
+	 *
+	 *  上の E_NOMEM は①（ブロック領域）の時点で失敗するので，②の失敗と
+	 *  巻き戻しの経路（mempfix.c の pk_cmpf->mpf 判定）を通らない．ここは
+	 *  「①は入るが①+②は入らない」サイジングで②を失敗させる．
+	 *
+	 *  【算術】カーネルメモリプールの実効容量は
+	 *    MPK_SIZE(2048) - sizeof(MEMPOOLCB)(12) = 2036 バイト
+	 *  である（32bit ターゲット）．ROUND_MPF_T(4) == sizeof(MPF_T) == 4，
+	 *  sizeof(MPFMB) == 4 なので，
+	 *
+	 *    ケースA: blkcnt=400 → ① 4*400=1600 ≤ 2036（成功）
+	 *                          ② 4*400=1600 > 2036-1600=436（失敗）→ E_NOMEM
+	 *    ケースB: blkcnt=200 → ① 4*200=800 ＋ ② 4*200=800 = 1600 ≤ 2036（成功）
+	 *
+	 *  【なぜケースBが巻き戻しの証拠になるか】
+	 *  kernel/startup.c のプールは bump allocator で，free_mempool は count が
+	 *  0 になったときにだけ brk を先頭へ戻す．ケースAで①が巻き戻されれば
+	 *  count は 0 に戻り brk がリセットされるので，直後のケースB（1600B）は
+	 *  入る．巻き戻しが無ければ count は 1 のまま，残量は 436B しかなく，
+	 *  ケースBは①（800B）の時点で E_NOMEM になる．
+	 *  ★したがって「ケースBが成功すること」が①の解放の直接の観測である．
+	 *
+	 *  ★このサイジングは 32bit ターゲット（musca_b1）の値である．本テストは
+	 *  musca_b1-2core でのみ実行される（DIVERGENCE_MAP.md 参照）．
+	 */
+	cmpf.blkcnt = 400U;							/*  ケースA  */
+	cmpf.blksz = 4U;
+	check_assert(acre_mpf(&cmpf) == E_NOMEM);	/*  ②で失敗 → ①を巻き戻す  */
+
+	cmpf.blkcnt = 200U;							/*  ケースB  */
+	cmpf.blksz = 4U;
+	erid = acre_mpf(&cmpf);
+	check_assert(erid == mpfid1);				/*  ★①が返っていなければ E_NOMEM  */
+	check_ercd(ref_mpf(mpfid1, &rmpf), E_OK);
+	check_assert(rmpf.fblkcnt == 200U);
+	check_ercd(del_mpf(mpfid1), E_OK);
+
 	/*  E_NOMEM で free-list が減っていないこと＝同じスロットが取れる  */
 	cmpf.blkcnt = MPF_BLKCNT;
 	cmpf.blksz = MPF_BLKSZ;
