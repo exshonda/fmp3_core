@@ -137,6 +137,9 @@
  */
 #undef initialize_mempfix
 #undef get_mpf_block
+#undef free_mpfcb
+#undef tmax_smpfid
+#undef ampfinib_table
 
 /*
  *  spin_lock.c

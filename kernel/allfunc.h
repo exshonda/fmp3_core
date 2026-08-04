@@ -212,6 +212,8 @@
 /* mempfix.c */
 #define TOPPERS_mpfini
 #define TOPPERS_mpfget
+#define TOPPERS_acre_mpf
+#define TOPPERS_del_mpf
 #define TOPPERS_get_mpf
 #define TOPPERS_pget_mpf
 #define TOPPERS_tget_mpf

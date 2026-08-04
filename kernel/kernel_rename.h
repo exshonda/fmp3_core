@@ -136,6 +136,9 @@
  */
 #define initialize_mempfix			_kernel_initialize_mempfix
 #define get_mpf_block				_kernel_get_mpf_block
+#define free_mpfcb					_kernel_free_mpfcb
+#define tmax_smpfid					_kernel_tmax_smpfid
+#define ampfinib_table				_kernel_ampfinib_table
 
 /*
  *  spin_lock.c

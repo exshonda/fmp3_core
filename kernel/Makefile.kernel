@@ -102,7 +102,8 @@ pridataq = pdqini.o pdqenq.o pdqdeq.o pdqsnd.o pdqrcv.o \
 mutex = mtxini.o mtxchk.o mtxacq.o mtxrel.o mtxrela.o acre_mtx.o del_mtx.o \
 		loc_mtx.o ploc_mtx.o tloc_mtx.o unl_mtx.o ini_mtx.o ref_mtx.o
 
-mempfix = mpfini.o mpfget.o get_mpf.o pget_mpf.o tget_mpf.o \
+mempfix = mpfini.o mpfget.o acre_mpf.o del_mpf.o \
+		get_mpf.o pget_mpf.o tget_mpf.o \
 		rel_mpf.o ini_mpf.o ref_mpf.o
 
 time_manage = set_tim.o get_tim.o adj_tim.o fch_hrt.o chknfy.o nfyhdr.o

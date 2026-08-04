@@ -109,6 +109,9 @@ amtxinib_table
 # mempfix.c
 initialize_mempfix
 get_mpf_block
+free_mpfcb
+tmax_smpfid
+ampfinib_table
 
 # spin_lock.c
 initialize_spin_lock
