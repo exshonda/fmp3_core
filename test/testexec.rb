@@ -91,6 +91,7 @@ TEST_SPEC = {
   "dcre2"    => { SRC: "test_dcre2" },
   "dcre3"    => { SRC: "test_dcre3" },
   "dcre4"    => { SRC: "test_dcre4" },
+  "dcre5"    => { SRC: "test_dcre5" },
   "dcremix"  => { SRC: "test_dcre_mix" },
   "dlynse"   => { SRC: "test_dlynse" },
   "dtq1"     => { SRC: "test_dtq1" },
